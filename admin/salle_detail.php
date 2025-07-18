@@ -12,6 +12,9 @@ $stmt = $pdo->prepare("SELECT s.*, f.nom as filiere_nom, n.nom as niveau_nom
 $stmt->execute([$salle_id]);
 $salle = $stmt->fetch();
 
+// Récupérer la semaine sélectionnée pour le rapport (si elle existe)
+$semaine_id = $_GET['semaine_id'] ?? 0;
+
 // Récupérer les séances de cours pour cette salle
 $stmt = $pdo->prepare("SELECT sc.*, m.nom as matiere_nom, u.name as enseignant_nom
                       FROM seances sc
@@ -94,26 +97,27 @@ $enseignants = $pdo->query("SELECT id, name FROM users WHERE grade = 'Enseignant
                 </div>
                 
                 <!-- Bouton pour générer le rapport -->
-<div class="card bg-dark text-white mt-4">
-    <div class="card-body">
-        <h5 class="card-title">Générer le rapport hebdomadaire</h5>
-        <form method="get" action="generer_rapport.php" target="_blank">
-            <input type="hidden" name="salle_id" value="<?= $salle_id ?>">
-            <div class="mb-3">
-                <label for="semaine_id" class="form-label">Semaine</label>
-                <select class="form-control" id="semaine_id" name="semaine_id" required>
-                    <?php 
-                    $semaines = $pdo->query("SELECT * FROM semaines ORDER BY numero")->fetchAll();
-                    foreach ($semaines as $s): ?>
-                        <option value="<?= $s['id'] ?>">Semaine <?= $s['numero'] ?> (<?= $s['date_debut'] ?> au <?= $s['date_fin'] ?>)</option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <button type="submit" class="btn btn-primary w-100">Générer le PDF</button>
-        </form>
-    </div>
-</div>
-
+                <div class="card bg-dark text-white mt-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Générer le rapport hebdomadaire</h5>
+                        <form method="get" action="generer_rapport.php" target="_blank">
+                            <input type="hidden" name="salle_id" value="<?= $salle_id ?>">
+                            <div class="mb-3">
+                                <label for="semaine_id" class="form-label">Semaine</label>
+                                <select class="form-control" id="semaine_id" name="semaine_id" required>
+                                    <?php 
+                                    $semaines = $pdo->query("SELECT * FROM semaines ORDER BY numero")->fetchAll();
+                                    foreach ($semaines as $s): ?>
+                                        <option value="<?= $s['id'] ?>" <?= $semaine_id == $s['id'] ? 'selected' : '' ?>>
+                                            Semaine <?= $s['numero'] ?> (<?= $s['date_debut'] ?> au <?= $s['date_fin'] ?>)
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Générer le PDF</button>
+                        </form>
+                    </div>
+                </div>
 
                 <!-- Formulaire pour ajouter une séance -->
                 <div class="card bg-dark text-white mt-4">
@@ -121,6 +125,7 @@ $enseignants = $pdo->query("SELECT id, name FROM users WHERE grade = 'Enseignant
                         <h5 class="card-title">Ajouter une séance</h5>
                         <form id="addSeanceForm" method="post" action="add_seance.php">
                             <input type="hidden" name="salle_id" value="<?= $salle_id ?>">
+                            <input type="hidden" name="semaine_id" value="<?= $semaine_id ?>">
                             
                             <div class="mb-3">
                                 <label for="cours_id" class="form-label">Cours</label>
@@ -234,6 +239,11 @@ $enseignants = $pdo->query("SELECT id, name FROM users WHERE grade = 'Enseignant
                 text: '<?= htmlspecialchars($_GET['error']) ?>'
             });
         <?php endif; ?>
+
+        // Mettre à jour la semaine sélectionnée dans le formulaire d'ajout de séance
+        document.getElementById('semaine_id').addEventListener('change', function() {
+            document.querySelector('input[name="semaine_id"]').value = this.value;
+        });
     </script>
 </body>
 </html>

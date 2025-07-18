@@ -11,6 +11,9 @@ require 'includes/db.php';
 if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
     require_once('includes/tcpdf/tcpdf.php');
     
+    // Récupérer le niveau sélectionné pour l'export
+    $niveau_id = $_GET['niveau_filter'] ?? null;
+    
     // Requête pour récupérer les données
     $query = "SELECT 
                 u.id, u.name, u.phone,
@@ -21,15 +24,25 @@ if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
                 GROUP_CONCAT(DISTINCT n.nom ORDER BY n.nom SEPARATOR ', ') as niveaux
               FROM users u
               LEFT JOIN seances s ON u.id = s.enseignant_id
-              LEFT JOIN cours c ON s.cours_id = c.id
-              LEFT JOIN emplois_temps e ON c.emploi_id = e.id
-              LEFT JOIN salles sa ON e.salle_id = sa.id
+              LEFT JOIN salles sa ON s.salle_id = sa.id
               LEFT JOIN filieres f ON sa.filiere_id = f.id
               LEFT JOIN niveaux n ON f.niveau_id = n.id
-              WHERE u.grade = 'Enseignant'
-              GROUP BY u.id";
+              WHERE u.grade = 'Enseignant'";
+    
+    // Ajout du filtre par niveau si sélectionné
+    if (!empty($niveau_id)) {
+        $query .= " AND n.id = :niveau_id";
+    }
+    
+    $query .= " GROUP BY u.id";
     
     $stmt = $pdo->prepare($query);
+    
+    // Liaison du paramètre niveau si nécessaire
+    if (!empty($niveau_id)) {
+        $stmt->bindParam(':niveau_id', $niveau_id, PDO::PARAM_INT);
+    }
+    
     $stmt->execute();
     $enseignants = $stmt->fetchAll();
 
@@ -50,8 +63,17 @@ if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
                 th { background-color: #6e48aa; color: white; padding: 5px; }
                 td { padding: 4px; border: 1px solid #ddd; }
             </style>
-            <h1>Suivi des Heures des Enseignants</h1>
-            <table>
+            <h1>Suivi des Heures des Enseignants</h1>';
+    
+    // Ajout du filtre appliqué dans le PDF
+    if (!empty($niveau_id)) {
+        $stmt_niveau = $pdo->prepare("SELECT nom FROM niveaux WHERE id = ?");
+        $stmt_niveau->execute([$niveau_id]);
+        $niveau_nom = $stmt_niveau->fetchColumn();
+        $html .= '<p style="text-align:center;font-weight:bold;">Filtre appliqué : Niveau '.htmlspecialchars($niveau_nom).'</p>';
+    }
+    
+    $html .= '<table>
                 <tr>
                     <th>Nom</th><th>Téléphone</th><th>Heures effectuées</th>
                     <th>Heures présentes</th><th>Heures absentes</th>
@@ -104,7 +126,17 @@ if (isset($_GET['action'])) {
         $_SESSION['message_type'] = "success";
     }
     
-    header("Location: suiviHeurProf.php");
+    // Conserver les paramètres de filtre dans la redirection
+    $redirect_url = "suiviHeurProf.php";
+    if (isset($_GET['niveau_filter'])) {
+        $redirect_url .= "?niveau_filter=".$_GET['niveau_filter'];
+    }
+    if (isset($_GET['search'])) {
+        $redirect_url .= (strpos($redirect_url, '?')) === false ? "?" : "&";
+        $redirect_url .= "search=".$_GET['search'];
+    }
+    
+    header("Location: ".$redirect_url);
     exit();
 }
 
@@ -112,6 +144,13 @@ if (isset($_GET['action'])) {
 // RÉCUPÉRATION DES DONNÉES
 // ======================================================================
 $search = $_GET['search'] ?? '';
+$niveau_id = $_GET['niveau_filter'] ?? null;
+
+// Récupérer la liste des niveaux pour le filtre
+$stmt_niveaux = $pdo->query("SELECT * FROM niveaux ORDER BY nom");
+$niveaux = $stmt_niveaux->fetchAll();
+
+// Requête principale pour les enseignants
 $query = "SELECT 
             u.id, u.name, u.phone,
             SUM(TIMESTAMPDIFF(HOUR, s.heure_debut, s.heure_fin)) as heures_effectuees,
@@ -121,27 +160,46 @@ $query = "SELECT
             GROUP_CONCAT(DISTINCT n.nom ORDER BY n.nom SEPARATOR ', ') as niveaux
           FROM users u
           LEFT JOIN seances s ON u.id = s.enseignant_id
-          LEFT JOIN cours c ON s.cours_id = c.id
-          LEFT JOIN emplois_temps e ON c.emploi_id = e.id
-          LEFT JOIN salles sa ON e.salle_id = sa.id
+          LEFT JOIN salles sa ON s.salle_id = sa.id
           LEFT JOIN filieres f ON sa.filiere_id = f.id
           LEFT JOIN niveaux n ON f.niveau_id = n.id
           WHERE u.grade = 'Enseignant'";
 
+// Ajout des conditions de filtre
 if (!empty($search)) {
     $query .= " AND u.name LIKE :search";
+}
+
+if (!empty($niveau_id)) {
+    $query .= " AND n.id = :niveau_id";
 }
 
 $query .= " GROUP BY u.id ORDER BY u.name";
 
 $stmt = $pdo->prepare($query);
 
+// Liaison des paramètres
 if (!empty($search)) {
     $stmt->bindValue(':search', "%$search%");
 }
 
+if (!empty($niveau_id)) {
+    $stmt->bindParam(':niveau_id', $niveau_id, PDO::PARAM_INT);
+}
+
 $stmt->execute();
 $enseignants = $stmt->fetchAll();
+
+// Calcul des totaux pour les statistiques
+$total_heures = 0;
+$total_present = 0;
+$total_absent = 0;
+
+foreach ($enseignants as $enseignant) {
+    $total_heures += $enseignant['heures_effectuees'] ?? 0;
+    $total_present += $enseignant['heures_present'] ?? 0;
+    $total_absent += $enseignant['heures_absent'] ?? 0;
+}
 ?>
 
 <!-- ====================================================================== -->
@@ -152,24 +210,44 @@ $enseignants = $stmt->fetchAll();
         <i class="fas fa-chalkboard-teacher me-2"></i> Suivi des Heures des Enseignants
     </h1>
 
-    <!-- Barre de recherche et bouton d'export -->
+    <!-- Barre de recherche et filtres -->
     <div class="row mb-4">
-        <div class="col-md-8 mx-auto">
-            <div class="d-flex justify-content-between">
-                <form method="get" class="input-group shadow-sm" style="width: 70%;">
-                    <input type="text" name="search" class="form-control" placeholder="Rechercher un enseignant..." value="<?= htmlspecialchars($search) ?>">
-                    <button class="btn btn-primary" type="submit">
-                        <i class="fas fa-search"></i>
-                    </button>
-                    <?php if (!empty($search)): ?>
-                    <a href="suiviHeurProf.php" class="btn btn-outline-danger">
-                        <i class="fas fa-times"></i>
-                    </a>
-                    <?php endif; ?>
-                </form>
-                <a href="?export=pdf" class="btn btn-danger ms-2">
-                    <i class="fas fa-file-pdf me-2"></i> Exporter en PDF
-                </a>
+        <div class="col-md-12">
+            <div class="card shadow-sm mb-4">
+                <div class="card-body">
+                    <form method="get" class="row g-3">
+                        <div class="col-md-5">
+                            <div class="input-group">
+                                <input type="text" name="search" class="form-control" placeholder="Rechercher un enseignant..." value="<?= htmlspecialchars($search) ?>">
+                                <button class="btn btn-primary" type="submit">
+                                    <i class="fas fa-search"></i>
+                                </button>
+                                <?php if (!empty($search)): ?>
+                                <a href="suiviHeurProf.php<?= !empty($niveau_id) ? '?niveau_filter='.$niveau_id : '' ?>" class="btn btn-outline-danger">
+                                    <i class="fas fa-times"></i>
+                                </a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <select name="niveau_filter" class="form-select" onchange="this.form.submit()">
+                                <option value="">Tous les niveaux</option>
+                                <?php foreach ($niveaux as $niveau): ?>
+                                <option value="<?= $niveau['id'] ?>" <?= $niveau_id == $niveau['id'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($niveau['nom']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-3 text-end">
+                            <a href="?export=pdf<?= !empty($niveau_id) ? '&niveau_filter='.$niveau_id : '' ?><?= !empty($search) ? '&search='.urlencode($search) : '' ?>" class="btn btn-danger">
+                                <i class="fas fa-file-pdf me-2"></i> Exporter en PDF
+                            </a>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
@@ -185,6 +263,18 @@ $enseignants = $stmt->fetchAll();
     unset($_SESSION['message_type']);
     endif; ?>
 
+    <!-- Indication du filtre appliqué -->
+    <?php if (!empty($niveau_id)): 
+        $niveau_nom = $niveaux[array_search($niveau_id, array_column($niveaux, 'id'))]['nom'];
+    ?>
+    <div class="alert alert-info mb-4">
+        Filtre appliqué : <strong>Niveau <?= htmlspecialchars($niveau_nom) ?></strong>
+        <a href="suiviHeurProf.php<?= !empty($search) ? '?search='.urlencode($search) : '' ?>" class="float-end">
+            <i class="fas fa-times"></i> Supprimer le filtre
+        </a>
+    </div>
+    <?php endif; ?>
+
     <!-- Tableau des enseignants -->
     <div class="card shadow-sm border-0">
         <div class="card-body p-0">
@@ -198,11 +288,20 @@ $enseignants = $stmt->fetchAll();
                             <th>Heures présentes</th>
                             <th>Heures absentes</th>
                             <th>Filières</th>
+                            <?php if (empty($niveau_id)): ?>
                             <th>Niveaux</th>
+                            <?php endif; ?>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
+                        <?php if (empty($enseignants)): ?>
+                        <tr>
+                            <td colspan="<?= empty($niveau_id) ? 8 : 7 ?>" class="text-center py-4">
+                                Aucun enseignant trouvé avec les critères sélectionnés
+                            </td>
+                        </tr>
+                        <?php else: ?>
                         <?php foreach ($enseignants as $enseignant): ?>
                         <tr>
                             <td><?= htmlspecialchars($enseignant['name']) ?></td>
@@ -211,7 +310,9 @@ $enseignants = $stmt->fetchAll();
                             <td><?= $enseignant['heures_present'] ?? 0 ?>h</td>
                             <td><?= $enseignant['heures_absent'] ?? 0 ?>h</td>
                             <td><?= htmlspecialchars($enseignant['filieres'] ?? 'N/A') ?></td>
+                            <?php if (empty($niveau_id)): ?>
                             <td><?= htmlspecialchars($enseignant['niveaux'] ?? 'N/A') ?></td>
+                            <?php endif; ?>
                             <td>
                                 <div class="d-flex gap-2">
                                     <a href="historique_seances.php?enseignant_id=<?= $enseignant['id'] ?>" 
@@ -219,13 +320,8 @@ $enseignants = $stmt->fetchAll();
                                        title="Historique">
                                         <i class="fas fa-history"></i>
                                     </a>
-                                    <a href="suiviHeurProf.php?action=reset&id=<?= $enseignant['id'] ?>" 
-                                       class="btn btn-sm btn-warning" 
-                                       title="Réinitialiser"
-                                       onclick="return confirm('Confirmer la réinitialisation?')">
-                                        <i class="fas fa-sync-alt"></i>
-                                    </a>
-                                    <a href="suiviHeurProf.php?action=delete&id=<?= $enseignant['id'] ?>" 
+ 
+                                    <a href="suiviHeurProf.php?action=delete&id=<?= $enseignant['id'] ?><?= !empty($niveau_id) ? '&niveau_filter='.$niveau_id : '' ?><?= !empty($search) ? '&search='.urlencode($search) : '' ?>" 
                                        class="btn btn-sm btn-danger" 
                                        title="Supprimer"
                                        onclick="return confirm('Confirmer la suppression?')">
@@ -235,6 +331,7 @@ $enseignants = $stmt->fetchAll();
                             </td>
                         </tr>
                         <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -248,7 +345,7 @@ $enseignants = $stmt->fetchAll();
                 <div class="card-body">
                     <h5 class="card-title">Total Heures</h5>
                     <p class="card-text display-6">
-                        <?= array_sum(array_column($enseignants, 'heures_effectuees')) ?>h
+                        <?= $total_heures ?>h
                     </p>
                 </div>
             </div>
@@ -258,7 +355,7 @@ $enseignants = $stmt->fetchAll();
                 <div class="card-body">
                     <h5 class="card-title">Présences</h5>
                     <p class="card-text display-6">
-                        <?= array_sum(array_column($enseignants, 'heures_present')) ?>h
+                        <?= $total_present ?>h
                     </p>
                 </div>
             </div>
@@ -268,7 +365,7 @@ $enseignants = $stmt->fetchAll();
                 <div class="card-body">
                     <h5 class="card-title">Absences</h5>
                     <p class="card-text display-6">
-                        <?= array_sum(array_column($enseignants, 'heures_absent')) ?>h
+                        <?= $total_absent ?>h
                     </p>
                 </div>
             </div>
