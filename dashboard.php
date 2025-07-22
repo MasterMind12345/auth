@@ -38,7 +38,6 @@ switch($current_day) {
 // Récupération de la semaine actuelle
 $current_week = getCurrentWeek($pdo);
 
-// Récupération des séances selon le rôle
 if (isDelegate()) {
     if (!isset($_SESSION['classroom'])) {
         $_SESSION['error'] = "Votre salle de classe n'est pas définie dans votre profil.";
@@ -663,7 +662,14 @@ function getCurrentWeek($pdo){
                 <?php endif; ?>
             </div>
         </div>
-        
+        <?php if (isTeacher()): ?>
+<div class="card">
+    <h2><i class="fas fa-user-graduate"></i> Gestion des Étudiants</h2>
+    <a href="promotion_temporaire.php" class="status-btn" style="background-color: #9c27b0;">
+        <i class="fas fa-user-shield"></i> Promotions Temporaires
+    </a>
+</div>
+<?php endif; ?>
         <?php if (!empty($seances)): ?>
         <div class="card">
             <h2><i class="fas fa-calendar-alt"></i> Séances du jour (<?php echo $today_french; ?>)</h2>

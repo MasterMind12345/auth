@@ -10,84 +10,136 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $jour = $_POST['jour'] ?? '';
     $salle_id = $_POST['salle'] ?? '';
     $formation = $_POST['formation'] ?? 'FI';
+    $mode_affichage = $_POST['mode_affichage'] ?? 'par_jour'; // Nouveau champ pour le mode d'affichage
     
-    if (!empty($semaine_id) && !empty($jour) && !empty($salle_id)) {
-        // 1. D'abord récupérer les séances correspondantes
-        $querySeances = "SELECT se.id 
-                        FROM seances se
-                        JOIN salles sa ON se.salle_id = sa.id
-                        WHERE se.semaine_id = ?
-                        AND se.jour = ?
-                        AND se.salle_id = ?
-                        AND sa.formation = ?";
-        
-        $stmtSeances = $pdo->prepare($querySeances);
-        $stmtSeances->execute([$semaine_id, $jour, $salle_id, $formation]);
-        $seancesIds = $stmtSeances->fetchAll(PDO::FETCH_COLUMN);
-        
-        // 2. Ensuite récupérer les présences pour ces séances
-        if (!empty($seancesIds)) {
-            $placeholders = rtrim(str_repeat('?,', count($seancesIds)), ',');
+    if (!empty($semaine_id)) {
+        if ($mode_affichage === 'par_jour' && !empty($jour) && !empty($salle_id)) {
+            // Mode original - par jour et salle
+            $querySeances = "SELECT se.id 
+                            FROM seances se
+                            JOIN salles sa ON se.salle_id = sa.id
+                            WHERE se.semaine_id = ?
+                            AND se.jour = ?
+                            AND se.salle_id = ?
+                            AND sa.formation = ?";
             
+            $stmtSeances = $pdo->prepare($querySeances);
+            $stmtSeances->execute([$semaine_id, $jour, $salle_id, $formation]);
+            $seancesIds = $stmtSeances->fetchAll(PDO::FETCH_COLUMN);
+            
+            // Récupérer les présences pour ces séances
+            if (!empty($seancesIds)) {
+                $placeholders = rtrim(str_repeat('?,', count($seancesIds)), ',');
+                
+                $queryPresences = "SELECT 
+                                    u.id AS etudiant_id,
+                                    u.name AS etudiant_nom,
+                                    u.phone AS etudiant_phone,
+                                    u.classroom AS salle_classe,
+                                    m.nom AS matiere_nom,
+                                    se.heure_debut,
+                                    se.heure_fin,
+                                    se.date_seance,
+                                    CONCAT(prof.name, ' (', TIME_FORMAT(se.debut_reel, '%H:%i'), '-', TIME_FORMAT(se.fin_reelle, '%H:%i'), ')') AS enseignant_info,
+                                    w.numero AS semaine_numero,
+                                    sa.nom AS salle_nom
+                                  FROM presences_etudiants pe
+                                  JOIN users u ON pe.etudiant_id = u.id
+                                  JOIN seances se ON pe.seance_id = se.id
+                                  JOIN salles sa ON se.salle_id = sa.id
+                                  JOIN semaines w ON se.semaine_id = w.id
+                                  JOIN cours c ON se.cours_id = c.id
+                                  JOIN matieres m ON c.matiere_id = m.id
+                                  JOIN users prof ON se.enseignant_id = prof.id
+                                  WHERE pe.seance_id IN ($placeholders)
+                                  AND pe.etat = 'present'
+                                  AND u.grade = 'Etudiant'
+                                  ORDER BY u.name, se.heure_debut";
+                
+                $stmtPresences = $pdo->prepare($queryPresences);
+                $stmtPresences->execute($seancesIds);
+                $presences = $stmtPresences->fetchAll();
+                
+                // Préparation des données pour le PDF (regroupement par étudiant)
+                $presencesPdf = [];
+                foreach ($presences as $presence) {
+                    $etudiant_id = $presence['etudiant_id'];
+                    if (!isset($presencesPdf[$etudiant_id])) {
+                        $presencesPdf[$etudiant_id] = [
+                            'etudiant_nom' => $presence['etudiant_nom'],
+                            'etudiant_phone' => $presence['etudiant_phone'],
+                            'salle_classe' => $presence['salle_classe'],
+                            'salle_nom' => $presence['salle_nom'],
+                            'semaine_numero' => $presence['semaine_numero']
+                        ];
+                    }
+                }
+            } else {
+                $presences = [];
+                $presencesPdf = [];
+            }
+        } elseif ($mode_affichage === 'par_semaine') {
+            // Nouveau mode - par semaine pour toute la formation
             $queryPresences = "SELECT 
                                 u.id AS etudiant_id,
                                 u.name AS etudiant_nom,
                                 u.phone AS etudiant_phone,
                                 u.classroom AS salle_classe,
-                                m.nom AS matiere_nom,
-                                se.heure_debut,
-                                se.heure_fin,
-                                se.date_seance,
-                                CONCAT(prof.name, ' (', TIME_FORMAT(se.debut_reel, '%H:%i'), '-', TIME_FORMAT(se.fin_reelle, '%H:%i'), ')') AS enseignant_info,
-                                w.numero AS semaine_numero,
-                                sa.nom AS salle_nom
+                                u.formation,
+                                COUNT(DISTINCT pe.seance_id) AS nb_seances_present,
+                                GROUP_CONCAT(DISTINCT m.nom SEPARATOR ', ') AS matieres,
+                                GROUP_CONCAT(DISTINCT se.jour SEPARATOR ', ') AS jours_presents,
+                                w.numero AS semaine_numero
                               FROM presences_etudiants pe
                               JOIN users u ON pe.etudiant_id = u.id
                               JOIN seances se ON pe.seance_id = se.id
-                              JOIN salles sa ON se.salle_id = sa.id
                               JOIN semaines w ON se.semaine_id = w.id
                               JOIN cours c ON se.cours_id = c.id
                               JOIN matieres m ON c.matiere_id = m.id
-                              JOIN users prof ON se.enseignant_id = prof.id
-                              WHERE pe.seance_id IN ($placeholders)
+                              WHERE se.semaine_id = ?
                               AND pe.etat = 'present'
                               AND u.grade = 'Etudiant'
-                              ORDER BY u.name, se.heure_debut";
+                              AND u.formation = ?
+                              GROUP BY u.id
+                              ORDER BY u.name";
             
             $stmtPresences = $pdo->prepare($queryPresences);
-            $stmtPresences->execute($seancesIds);
+            $stmtPresences->execute([$semaine_id, $formation]);
             $presences = $stmtPresences->fetchAll();
             
-            // Préparation des données pour le PDF (regroupement par étudiant)
+            // Préparation des données pour le PDF
             $presencesPdf = [];
             foreach ($presences as $presence) {
-                $etudiant_id = $presence['etudiant_id'];
-                if (!isset($presencesPdf[$etudiant_id])) {
-                    $presencesPdf[$etudiant_id] = [
-                        'etudiant_nom' => $presence['etudiant_nom'],
-                        'etudiant_phone' => $presence['etudiant_phone'],
-                        'salle_classe' => $presence['salle_classe'],
-                        'salle_nom' => $presence['salle_nom'],
-                        'semaine_numero' => $presence['semaine_numero']
-                    ];
-                }
+                $presencesPdf[$presence['etudiant_id']] = [
+                    'etudiant_nom' => $presence['etudiant_nom'],
+                    'etudiant_phone' => $presence['etudiant_phone'],
+                    'salle_classe' => $presence['salle_classe'],
+                    'nb_seances_present' => $presence['nb_seances_present'],
+                    'matieres' => $presence['matieres'],
+                    'semaine_numero' => $presence['semaine_numero'],
+                    'formation' => $presence['formation']
+                ];
             }
-        } else {
-            $presences = [];
-            $presencesPdf = [];
         }
         
         // Génération du PDF
         if (isset($_POST['generate_pdf'])) {
-            $html = generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo);
+            $html = generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo, $mode_affichage);
             $dompdf = new Dompdf();
             $dompdf->loadHtml($html);
             $dompdf->setPaper('A4', 'portrait');
             $dompdf->render();
             
-            $salle_nom = $presences[0]['salle_nom'] ?? 'Salle';
-            $semaine_numero = $presences[0]['semaine_numero'] ?? '0';
-            $filename = "presences_{$salle_nom}_{$jour}_semaine{$semaine_numero}.pdf";
+            $semaine_info = $pdo->prepare("SELECT numero FROM semaines WHERE id = ?");
+            $semaine_info->execute([$semaine_id]);
+            $semaine = $semaine_info->fetch();
+            
+            if ($mode_affichage === 'par_jour') {
+                $salle_nom = $presences[0]['salle_nom'] ?? 'Salle';
+                $filename = "presences_{$salle_nom}_{$jour}_semaine{$semaine['numero']}.pdf";
+            } else {
+                $filename = "presences_{$formation}_semaine{$semaine['numero']}.pdf";
+            }
             
             $dompdf->stream($filename, ["Attachment" => true]);
             exit;
@@ -95,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo) {
+function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo, $mode_affichage = 'par_jour') {
     // Récupérer les infos de la semaine
     $semaine_info = $pdo->prepare("SELECT numero, date_debut, date_fin FROM semaines WHERE id = ?");
     $semaine_info->execute([$semaine_id]);
@@ -120,11 +172,15 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
         <h1>Liste de présence</h1>
         <div class="header-info">
             <p><strong>Semaine:</strong> '.htmlspecialchars($semaine['numero']).' ('.htmlspecialchars($semaine['date_debut']).' au '.htmlspecialchars($semaine['date_fin']).')</p>
-            <p><strong>Jour:</strong> '.htmlspecialchars($jour).'</p>
             <p><strong>Formation:</strong> '.htmlspecialchars($formation).'</p>';
     
-    if (!empty($presencesPdf)) {
-        $html .= '<p><strong>Salle:</strong> '.htmlspecialchars($presencesPdf[array_key_first($presencesPdf)]['salle_nom']).'</p>';
+    if ($mode_affichage === 'par_jour') {
+        $html .= '<p><strong>Jour:</strong> '.htmlspecialchars($jour).'</p>';
+        if (!empty($presencesPdf)) {
+            $html .= '<p><strong>Salle:</strong> '.htmlspecialchars($presencesPdf[array_key_first($presencesPdf)]['salle_nom']).'</p>';
+        }
+    } else {
+        $html .= '<p><strong>Mode:</strong> Vue globale de la semaine</p>';
     }
     
     $html .= '</div>';
@@ -136,8 +192,14 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
                             <th>N°</th>
                             <th>Étudiant</th>
                             <th>Téléphone</th>
-                            <th>Salle de classe</th>
-                        </tr>
+                            <th>Salle de classe</th>';
+        
+        if ($mode_affichage === 'par_semaine') {
+            $html .= '<th>Nombre de séances</th>
+                       <th>Matières</th>';
+        }
+        
+        $html .= '</tr>
                     </thead>
                     <tbody>';
         
@@ -147,8 +209,14 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
                         <td>'.$index.'</td>
                         <td>'.htmlspecialchars($presence['etudiant_nom']).'</td>
                         <td>'.htmlspecialchars($presence['etudiant_phone']).'</td>
-                        <td>'.htmlspecialchars($presence['salle_classe']).'</td>
-                      </tr>';
+                        <td>'.htmlspecialchars($presence['salle_classe']).'</td>';
+            
+            if ($mode_affichage === 'par_semaine') {
+                $html .= '<td>'.htmlspecialchars($presence['nb_seances_present']).'</td>
+                          <td>'.htmlspecialchars($presence['matieres']).'</td>';
+            }
+            
+            $html .= '</tr>';
             $index++;
         }
         
@@ -216,6 +284,10 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
             border-color: #6e48aa;
             box-shadow: 0 0 0 0.25rem rgba(110, 72, 170, 0.25);
         }
+        .form-check-input:checked {
+            background-color: #6e48aa;
+            border-color: #6e48aa;
+        }
     </style>
 </head>
 <body>
@@ -243,8 +315,16 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
                 </div>
                 
                 <div class="col-md-2">
+                    <label for="mode_affichage" class="form-label">Mode d'affichage</label>
+                    <select class="form-select" id="mode_affichage" name="mode_affichage">
+                        <option value="par_jour" <?= isset($mode_affichage) && $mode_affichage == 'par_jour' ? 'selected' : '' ?>>Par jour</option>
+                        <option value="par_semaine" <?= isset($mode_affichage) && $mode_affichage == 'par_semaine' ? 'selected' : '' ?>>Par semaine</option>
+                    </select>
+                </div>
+                
+                <div class="col-md-2" id="jour-container">
                     <label for="jour" class="form-label">Jour</label>
-                    <select class="form-select" id="jour" name="jour" required>
+                    <select class="form-select" id="jour" name="jour">
                         <option value="">Sélectionnez un jour</option>
                         <option value="LUNDI" <?= isset($jour) && $jour == 'LUNDI' ? 'selected' : '' ?>>Lundi</option>
                         <option value="MARDI" <?= isset($jour) && $jour == 'MARDI' ? 'selected' : '' ?>>Mardi</option>
@@ -256,9 +336,9 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
                     </select>
                 </div>
                 
-                <div class="col-md-3">
+                <div class="col-md-3" id="salle-container">
                     <label for="salle" class="form-label">Salle</label>
-                    <select class="form-select" id="salle" name="salle" required>
+                    <select class="form-select" id="salle" name="salle">
                         <option value="">Sélectionnez une salle</option>
                         <?php
                         $salles = $pdo->query("SELECT * FROM salles ORDER BY nom");
@@ -309,9 +389,14 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
                             <th>Étudiant</th>
                             <th>Téléphone</th>
                             <th>Salle de classe</th>
-                            <th>Matière</th>
-                            <th>Heure</th>
-                            <th>Enseignant</th>
+                            <?php if ($mode_affichage === 'par_semaine'): ?>
+                                <th>Nombre de séances</th>
+                                <th>Matières</th>
+                            <?php else: ?>
+                                <th>Matière</th>
+                                <th>Heure</th>
+                                <th>Enseignant</th>
+                            <?php endif; ?>
                         </tr>
                     </thead>
                     <tbody>
@@ -321,9 +406,15 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
                             <td><?= htmlspecialchars($presence['etudiant_nom']) ?></td>
                             <td><?= htmlspecialchars($presence['etudiant_phone']) ?></td>
                             <td><?= htmlspecialchars($presence['salle_classe']) ?></td>
-                            <td><?= htmlspecialchars($presence['matiere_nom']) ?></td>
-                            <td><?= htmlspecialchars($presence['heure_debut']) ?> - <?= htmlspecialchars($presence['heure_fin']) ?></td>
-                            <td><?= htmlspecialchars($presence['enseignant_info']) ?></td>
+                            
+                            <?php if ($mode_affichage === 'par_semaine'): ?>
+                                <td><?= htmlspecialchars($presence['nb_seances_present']) ?></td>
+                                <td><?= htmlspecialchars($presence['matieres']) ?></td>
+                            <?php else: ?>
+                                <td><?= htmlspecialchars($presence['matiere_nom']) ?></td>
+                                <td><?= htmlspecialchars($presence['heure_debut']) ?> - <?= htmlspecialchars($presence['heure_fin']) ?></td>
+                                <td><?= htmlspecialchars($presence['enseignant_info']) ?></td>
+                            <?php endif; ?>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -339,5 +430,32 @@ function generatePdfContent($presencesPdf, $jour, $formation, $semaine_id, $pdo)
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    document.getElementById('mode_affichage').addEventListener('change', function() {
+        const mode = this.value;
+        const jourContainer = document.getElementById('jour-container');
+        const salleContainer = document.getElementById('salle-container');
+        
+        if (mode === 'par_semaine') {
+            jourContainer.style.display = 'none';
+            salleContainer.style.display = 'none';
+            document.getElementById('jour').required = false;
+            document.getElementById('salle').required = false;
+        } else {
+            jourContainer.style.display = 'block';
+            salleContainer.style.display = 'block';
+            document.getElementById('jour').required = true;
+            document.getElementById('salle').required = true;
+        }
+    });
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        const mode = document.getElementById('mode_affichage').value;
+        if (mode === 'par_semaine') {
+            document.getElementById('jour-container').style.display = 'none';
+            document.getElementById('salle-container').style.display = 'none';
+        }
+    });
+</script>
 </body>
 </html>

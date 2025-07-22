@@ -1,35 +1,30 @@
 <?php
-// Activation du buffer de sortie dès le début
 ob_start();
-
-// Inclusion de la connexion DB en premier
 require 'includes/db.php';
 
 // ======================================================================
-// GESTION DE L'EXPORT PDF (DOIT ÊTRE AVANT TOUTE SORTIE HTML)
+// GESTION DE L'EXPORT PDF
 // ======================================================================
-if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
+if (isset($_GET['export'])) {
     require_once('includes/tcpdf/tcpdf.php');
     
-    // Récupérer le niveau sélectionné pour l'export
     $niveau_id = $_GET['niveau_filter'] ?? null;
     
-    // Requête pour récupérer les données
     $query = "SELECT 
                 u.id, u.name, u.phone,
-                SUM(TIMESTAMPDIFF(HOUR, s.heure_debut, s.heure_fin)) as heures_effectuees,
-                SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(HOUR, s.heure_debut, s.heure_fin) ELSE 0 END) as heures_present,
-                SUM(CASE WHEN s.etat_final = 'absent' THEN TIMESTAMPDIFF(HOUR, s.heure_debut, s.heure_fin) ELSE 0 END) as heures_absent,
+                SUM(TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin)) as heures_programmees,
+                SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_effectuees,
+                SUM(CASE WHEN s.etat_final = 'absent' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_absentes,
                 GROUP_CONCAT(DISTINCT f.nom ORDER BY f.nom SEPARATOR ', ') as filieres,
                 GROUP_CONCAT(DISTINCT n.nom ORDER BY n.nom SEPARATOR ', ') as niveaux
               FROM users u
               LEFT JOIN seances s ON u.id = s.enseignant_id
+              LEFT JOIN cours c ON s.cours_id = c.id
               LEFT JOIN salles sa ON s.salle_id = sa.id
               LEFT JOIN filieres f ON sa.filiere_id = f.id
               LEFT JOIN niveaux n ON f.niveau_id = n.id
               WHERE u.grade = 'Enseignant'";
     
-    // Ajout du filtre par niveau si sélectionné
     if (!empty($niveau_id)) {
         $query .= " AND n.id = :niveau_id";
     }
@@ -38,7 +33,6 @@ if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
     
     $stmt = $pdo->prepare($query);
     
-    // Liaison du paramètre niveau si nécessaire
     if (!empty($niveau_id)) {
         $stmt->bindParam(':niveau_id', $niveau_id, PDO::PARAM_INT);
     }
@@ -46,17 +40,13 @@ if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
     $stmt->execute();
     $enseignants = $stmt->fetchAll();
 
-    // Création du PDF
     $pdf = new TCPDF('L', PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
-    
-    // Configuration du document
     $pdf->SetCreator(PDF_CREATOR);
     $pdf->SetAuthor('Établissement Scolaire');
     $pdf->SetTitle('Rapport des heures enseignants');
     $pdf->SetMargins(10, 20, 10);
     $pdf->AddPage();
 
-    // Construction du HTML
     $html = '<style>
                 h1 { color: #6e48aa; text-align: center; }
                 table { width: 100%; border-collapse: collapse; }
@@ -65,7 +55,6 @@ if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
             </style>
             <h1>Suivi des Heures des Enseignants</h1>';
     
-    // Ajout du filtre appliqué dans le PDF
     if (!empty($niveau_id)) {
         $stmt_niveau = $pdo->prepare("SELECT nom FROM niveaux WHERE id = ?");
         $stmt_niveau->execute([$niveau_id]);
@@ -75,18 +64,28 @@ if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
     
     $html .= '<table>
                 <tr>
-                    <th>Nom</th><th>Téléphone</th><th>Heures effectuées</th>
-                    <th>Heures présentes</th><th>Heures absentes</th>
-                    <th>Filières</th><th>Niveaux</th>
+                    <th>Nom</th>
+                    <th>Téléphone</th>
+                    <th>Heures programmées</th>
+                    <th>Heures effectuées</th>
+                    <th>Heures absentes</th>
+                    <th>Taux présence</th>
+                    <th>Filières</th>
+                    <th>Niveaux</th>
                 </tr>';
 
     foreach ($enseignants as $enseignant) {
+        $taux_presence = ($enseignant['heures_programmees'] > 0) 
+            ? round(($enseignant['heures_effectuees'] / $enseignant['heures_programmees']) * 100, 2) 
+            : 0;
+        
         $html .= '<tr>
                     <td>'.htmlspecialchars($enseignant['name']).'</td>
                     <td>'.htmlspecialchars($enseignant['phone']).'</td>
+                    <td>'.($enseignant['heures_programmees'] ?? 0).'h</td>
                     <td>'.($enseignant['heures_effectuees'] ?? 0).'h</td>
-                    <td>'.($enseignant['heures_present'] ?? 0).'h</td>
-                    <td>'.($enseignant['heures_absent'] ?? 0).'h</td>
+                    <td>'.($enseignant['heures_absentes'] ?? 0).'h</td>
+                    <td>'.$taux_presence.'%</td>
                     <td>'.htmlspecialchars($enseignant['filieres'] ?? 'N/A').'</td>
                     <td>'.htmlspecialchars($enseignant['niveaux'] ?? 'N/A').'</td>
                 </tr>';
@@ -94,23 +93,15 @@ if (isset($_GET['export']) && $_GET['export'] == 'pdf') {
 
     $html .= '</table>';
 
-    // Ajout du contenu au PDF
-    $pdf->writeHTML($html, true, false, true, false, '');
-
-    // Nettoyage du buffer et sortie
     ob_end_clean();
+    $pdf->writeHTML($html, true, false, true, false, '');
     $pdf->Output('rapport_heures_'.date('Y-m-d').'.pdf', 'D');
     exit();
 }
 
-// ======================================================================
-// INCLUSION DU HEADER (APRÈS LE TRAITEMENT PDF)
-// ======================================================================
 include 'includes/admin-header.php';
 
-// ======================================================================
-// GESTION DES ACTIONS (RESET/DELETE)
-// ======================================================================
+// Gestion des actions
 if (isset($_GET['action'])) {
     $id = $_GET['id'] ?? null;
     
@@ -126,7 +117,6 @@ if (isset($_GET['action'])) {
         $_SESSION['message_type'] = "success";
     }
     
-    // Conserver les paramètres de filtre dans la redirection
     $redirect_url = "suiviHeurProf.php";
     if (isset($_GET['niveau_filter'])) {
         $redirect_url .= "?niveau_filter=".$_GET['niveau_filter'];
@@ -140,32 +130,28 @@ if (isset($_GET['action'])) {
     exit();
 }
 
-// ======================================================================
-// RÉCUPÉRATION DES DONNÉES
-// ======================================================================
+// Récupération des données
 $search = $_GET['search'] ?? '';
 $niveau_id = $_GET['niveau_filter'] ?? null;
 
-// Récupérer la liste des niveaux pour le filtre
 $stmt_niveaux = $pdo->query("SELECT * FROM niveaux ORDER BY nom");
 $niveaux = $stmt_niveaux->fetchAll();
 
-// Requête principale pour les enseignants
 $query = "SELECT 
             u.id, u.name, u.phone,
-            SUM(TIMESTAMPDIFF(HOUR, s.heure_debut, s.heure_fin)) as heures_effectuees,
-            SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(HOUR, s.heure_debut, s.heure_fin) ELSE 0 END) as heures_present,
-            SUM(CASE WHEN s.etat_final = 'absent' THEN TIMESTAMPDIFF(HOUR, s.heure_debut, s.heure_fin) ELSE 0 END) as heures_absent,
+            SUM(TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin)) as heures_programmees,
+            SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_effectuees,
+            SUM(CASE WHEN s.etat_final = 'absent' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_absentes,
             GROUP_CONCAT(DISTINCT f.nom ORDER BY f.nom SEPARATOR ', ') as filieres,
             GROUP_CONCAT(DISTINCT n.nom ORDER BY n.nom SEPARATOR ', ') as niveaux
           FROM users u
           LEFT JOIN seances s ON u.id = s.enseignant_id
+          LEFT JOIN cours c ON s.cours_id = c.id
           LEFT JOIN salles sa ON s.salle_id = sa.id
           LEFT JOIN filieres f ON sa.filiere_id = f.id
           LEFT JOIN niveaux n ON f.niveau_id = n.id
           WHERE u.grade = 'Enseignant'";
 
-// Ajout des conditions de filtre
 if (!empty($search)) {
     $query .= " AND u.name LIKE :search";
 }
@@ -178,7 +164,6 @@ $query .= " GROUP BY u.id ORDER BY u.name";
 
 $stmt = $pdo->prepare($query);
 
-// Liaison des paramètres
 if (!empty($search)) {
     $stmt->bindValue(':search', "%$search%");
 }
@@ -190,21 +175,20 @@ if (!empty($niveau_id)) {
 $stmt->execute();
 $enseignants = $stmt->fetchAll();
 
-// Calcul des totaux pour les statistiques
-$total_heures = 0;
-$total_present = 0;
-$total_absent = 0;
+// Calcul des totaux
+$total_programme = 0;
+$total_effectue = 0;
+$total_absente = 0;
 
 foreach ($enseignants as $enseignant) {
-    $total_heures += $enseignant['heures_effectuees'] ?? 0;
-    $total_present += $enseignant['heures_present'] ?? 0;
-    $total_absent += $enseignant['heures_absent'] ?? 0;
+    $total_programme += $enseignant['heures_programmees'] ?? 0;
+    $total_effectue += $enseignant['heures_effectuees'] ?? 0;
+    $total_absente += $enseignant['heures_absentes'] ?? 0;
 }
+
+$taux_global = ($total_programme > 0) ? round(($total_effectue / $total_programme) * 100, 2) : 0;
 ?>
 
-<!-- ====================================================================== -->
-<!-- DÉBUT DU HTML -->
-<!-- ====================================================================== -->
 <div class="container py-5">
     <h1 class="text-center mb-5" style="color: #6e48aa;">
         <i class="fas fa-chalkboard-teacher me-2"></i> Suivi des Heures des Enseignants
@@ -252,7 +236,6 @@ foreach ($enseignants as $enseignant) {
         </div>
     </div>
 
-    <!-- Messages de notification -->
     <?php if (isset($_SESSION['message'])): ?>
     <div class="alert alert-<?= $_SESSION['message_type'] ?> alert-dismissible fade show" role="alert">
         <?= $_SESSION['message'] ?>
@@ -263,7 +246,6 @@ foreach ($enseignants as $enseignant) {
     unset($_SESSION['message_type']);
     endif; ?>
 
-    <!-- Indication du filtre appliqué -->
     <?php if (!empty($niveau_id)): 
         $niveau_nom = $niveaux[array_search($niveau_id, array_column($niveaux, 'id'))]['nom'];
     ?>
@@ -284,9 +266,10 @@ foreach ($enseignants as $enseignant) {
                         <tr>
                             <th>Nom</th>
                             <th>Téléphone</th>
-                            <th>Heures effectuées</th>
-                            <th>Heures présentes</th>
-                            <th>Heures absentes</th>
+                            <th>Programmées</th>
+                            <th>Effectuées</th>
+                            <th>Absentes</th>
+                            <th>Taux</th>
                             <th>Filières</th>
                             <?php if (empty($niveau_id)): ?>
                             <th>Niveaux</th>
@@ -297,18 +280,27 @@ foreach ($enseignants as $enseignant) {
                     <tbody>
                         <?php if (empty($enseignants)): ?>
                         <tr>
-                            <td colspan="<?= empty($niveau_id) ? 8 : 7 ?>" class="text-center py-4">
+                            <td colspan="<?= empty($niveau_id) ? 9 : 8 ?>" class="text-center py-4">
                                 Aucun enseignant trouvé avec les critères sélectionnés
                             </td>
                         </tr>
                         <?php else: ?>
-                        <?php foreach ($enseignants as $enseignant): ?>
+                        <?php foreach ($enseignants as $enseignant): 
+                            $taux_presence = ($enseignant['heures_programmees'] > 0) 
+                                ? round(($enseignant['heures_effectuees'] / $enseignant['heures_programmees']) * 100, 2) 
+                                : 0;
+                        ?>
                         <tr>
                             <td><?= htmlspecialchars($enseignant['name']) ?></td>
                             <td><?= htmlspecialchars($enseignant['phone']) ?></td>
+                            <td><?= $enseignant['heures_programmees'] ?? 0 ?>h</td>
                             <td><?= $enseignant['heures_effectuees'] ?? 0 ?>h</td>
-                            <td><?= $enseignant['heures_present'] ?? 0 ?>h</td>
-                            <td><?= $enseignant['heures_absent'] ?? 0 ?>h</td>
+                            <td><?= $enseignant['heures_absentes'] ?? 0 ?>h</td>
+                            <td>
+                                <span class="badge bg-<?= $taux_presence >= 90 ? 'success' : ($taux_presence >= 70 ? 'warning' : 'danger') ?>">
+                                    <?= $taux_presence ?>%
+                                </span>
+                            </td>
                             <td><?= htmlspecialchars($enseignant['filieres'] ?? 'N/A') ?></td>
                             <?php if (empty($niveau_id)): ?>
                             <td><?= htmlspecialchars($enseignant['niveaux'] ?? 'N/A') ?></td>
@@ -320,7 +312,6 @@ foreach ($enseignants as $enseignant) {
                                        title="Historique">
                                         <i class="fas fa-history"></i>
                                     </a>
- 
                                     <a href="suiviHeurProf.php?action=delete&id=<?= $enseignant['id'] ?><?= !empty($niveau_id) ? '&niveau_filter='.$niveau_id : '' ?><?= !empty($search) ? '&search='.urlencode($search) : '' ?>" 
                                        class="btn btn-sm btn-danger" 
                                        title="Supprimer"
@@ -343,40 +334,32 @@ foreach ($enseignants as $enseignant) {
         <div class="col-md-3">
             <div class="card bg-primary text-white shadow-sm">
                 <div class="card-body">
-                    <h5 class="card-title">Total Heures</h5>
-                    <p class="card-text display-6">
-                        <?= $total_heures ?>h
-                    </p>
+                    <h5 class="card-title">Programmées</h5>
+                    <p class="card-text display-6"><?= $total_programme ?>h</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="card bg-success text-white shadow-sm">
                 <div class="card-body">
-                    <h5 class="card-title">Présences</h5>
-                    <p class="card-text display-6">
-                        <?= $total_present ?>h
-                    </p>
+                    <h5 class="card-title">Effectuées</h5>
+                    <p class="card-text display-6"><?= $total_effectue ?>h</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="card bg-danger text-white shadow-sm">
                 <div class="card-body">
-                    <h5 class="card-title">Absences</h5>
-                    <p class="card-text display-6">
-                        <?= $total_absent ?>h
-                    </p>
+                    <h5 class="card-title">Absentes</h5>
+                    <p class="card-text display-6"><?= $total_absente ?>h</p>
                 </div>
             </div>
         </div>
         <div class="col-md-3">
             <div class="card bg-info text-white shadow-sm">
                 <div class="card-body">
-                    <h5 class="card-title">Enseignants</h5>
-                    <p class="card-text display-6">
-                        <?= count($enseignants) ?>
-                    </p>
+                    <h5 class="card-title">Taux présence</h5>
+                    <p class="card-text display-6"><?= $taux_global ?>%</p>
                 </div>
             </div>
         </div>

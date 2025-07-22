@@ -104,7 +104,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$is_locked) {
     }
 }
 
-// Fonction pour générer le PDF
 function generatePresencePDF($seance_id, $seance, $confirmed_students, $classroom) {
     require_once 'includes/tcpdf/tcpdf.php';
     
@@ -120,10 +119,9 @@ function generatePresencePDF($seance_id, $seance, $confirmed_students, $classroo
     
     // Contenu HTML
     $html = '<h1 style="text-align:center;">Liste de Présence</h1>';
-    $html .= '<h2 style="text-align:center;">Séance du ' . date('d/m/Y') . '</h2>';
+    $html .= '<h2 style="text-align:center;">Séance du ' . date('d/m/Y', strtotime($seance['date_seance'] ?? 'now')) . '</h2>';
     $html .= '<p><strong>Matière:</strong> ' . htmlspecialchars($seance['matiere_nom']) . ' (' . htmlspecialchars($seance['matiere_code']) . ')</p>';
-    $html .= '<p><strong>Enseignant:</strong> ' . htmlspecialchars($seance['enseignant_nom']) . '</p>';
-    $html .= '<p><strong>Salle:</strong> ' . htmlspecialchars($seance['salle_nom']) . '</p>';
+    $html .= '<p><strong>Salle:</strong> ' . htmlspecialchars($seance['salle_nom']) . ' (' . htmlspecialchars($seance['formation'] ?? 'FI') . ')</p>';
     $html .= '<p><strong>Heure:</strong> ' . htmlspecialchars($seance['heure_debut']) . ' - ' . htmlspecialchars($seance['heure_fin']) . '</p>';
     
     // Récupération des étudiants avec leur statut
@@ -139,30 +137,79 @@ function generatePresencePDF($seance_id, $seance, $confirmed_students, $classroo
     $stmt->execute([$seance_id, $classroom]);
     $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    $html .= '<h3>Étudiants (' . count($students) . ')</h3>';
+    // Calcul des statistiques
+    $stats = [
+        'FA_present' => 0,
+        'FI_present' => 0,
+        'absent' => 0,
+        'total' => count($students)
+    ];
+    
+    foreach ($students as $student) {
+        if ($student['presence_etat'] === 'present') {
+            if ($student['formation'] === 'FA') {
+                $stats['FA_present']++;
+            } else {
+                $stats['FI_present']++;
+            }
+        } else {
+            $stats['absent']++;
+        }
+    }
+    
+    // Affichage des statistiques
+    $html .= '<div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;">
+                <h3 style="margin-top:0;">Statistiques de présence</h3>
+                <table style="width:100%;">
+                    <tr>
+                        <td style="width:33%;"><strong>FA Présents:</strong> ' . $stats['FA_present'] . '</td>
+                        <td style="width:33%;"><strong>FI Présents:</strong> ' . $stats['FI_present'] . '</td>
+                        <td style="width:33%;"><strong>Absents:</strong> ' . $stats['absent'] . '</td>
+                    </tr>
+                    <tr>
+                        <td colspan="3" style="padding-top:5px;"><strong>Total étudiants:</strong> ' . $stats['total'] . '</td>
+                    </tr>
+                </table>
+              </div>';
+    
+    $html .= '<h3>Détail des étudiants (' . $stats['total'] . ')</h3>';
     $html .= '<table border="1" cellpadding="5" style="width:100%">
                 <tr>
-                    <th width="30%">Nom</th>
-                    <th width="20%">Formation</th>
+                    <th width="25%">Nom</th>
+                    <th width="15%">Formation</th>
                     <th width="20%">Filière</th>
                     <th width="15%">Niveau</th>
                     <th width="15%">Présence</th>
                 </tr>';
     
+    $salle_formation = $seance['formation'] ?? 'FI'; // Par défaut FI si non défini
+    
     foreach ($students as $student) {
         $presence = ($student['presence_etat'] === 'present') ? 'Présent' : 'Absent';
-        $color = ($student['presence_etat'] === 'present') ? '#4CAF50' : '#F44336';
+        $presence_color = ($student['presence_etat'] === 'present') ? '#4CAF50' : '#F44336';
         
-        $html .= '<tr>
+        // Vérifier si l'étudiant est dans la mauvaise formation pour cette salle
+        $is_wrong_formation = ($salle_formation === 'FI' && $student['formation'] === 'FA') || 
+                             ($salle_formation === 'FA' && $student['formation'] === 'FI');
+        
+        // Style pour les étudiants en mauvaise formation (jaune avec texte en noir pour lisibilité)
+        $row_style = $is_wrong_formation ? 'background-color:#FFC107;color:#000000;' : '';
+        
+        $html .= '<tr style="'.$row_style.'">
                     <td>' . htmlspecialchars($student['name']) . '</td>
                     <td>' . htmlspecialchars($student['formation']) . '</td>
                     <td>' . htmlspecialchars($student['filiere']) . '</td>
                     <td>' . htmlspecialchars($student['niveau']) . '</td>
-                    <td style="color:' . $color . ';font-weight:bold;">' . $presence . '</td>
+                    <td style="color:' . $presence_color . ';font-weight:bold;">' . $presence . '</td>
                 </tr>';
     }
     
     $html .= '</table>';
+    
+    // Légende pour expliquer la couleur jaune
+    $html .= '<div style="margin-top: 10px; padding: 5px; background-color: #FFC107; color: #000000; display: inline-block;">
+                <i class="fas fa-info-circle"></i> Étudiant en formation ' . ($salle_formation === 'FI' ? 'FA' : 'FI') . ' dans une salle ' . $salle_formation . '
+              </div>';
     
     // Pied de page
     $html .= '<p style="margin-top:20px;text-align:right;">Généré le ' . date('d/m/Y H:i') . ' par ' . htmlspecialchars($_SESSION['name']) . '</p>';

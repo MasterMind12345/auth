@@ -29,14 +29,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $user = $stmt->fetch();
         
         if ($user && password_verify($password, $user['password'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['name'] = $user['name'];
-            $_SESSION['grade'] = $user['grade'];
-            $_SESSION['validated'] = $user['validated'];
+            // Vérifier si l'utilisateur a une promotion temporaire active
+            $stmt = $pdo->prepare("SELECT * FROM promotions_temporaires 
+                                 WHERE etudiant_id = ? AND date_fin > NOW()");
+            $stmt->execute([$user['id']]);
+            $promotion_active = $stmt->fetch();
             
-            // Ajout de la salle de classe dans la session si l'utilisateur est délégué ou étudiant
-            if ($user['grade'] === 'Delegue' || $user['grade'] === 'Etudiant') {
+            if ($promotion_active && $user['grade'] === 'Etudiant') {
+                // Si promotion active, traiter comme un délégué
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['name'] = $user['name'];
+                $_SESSION['grade'] = 'Delegue'; // On override le grade
+                $_SESSION['validated'] = 'yes'; // On considère comme validé
                 $_SESSION['classroom'] = $user['classroom'];
+                $_SESSION['promotion_temporaire'] = true;
                 
                 // Récupération des informations supplémentaires sur la salle
                 $stmt = $pdo->prepare("SELECT f.nom as filiere_nom 
@@ -49,23 +55,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($salle_info) {
                     $_SESSION['filiere'] = $salle_info['filiere_nom'];
                 }
-            }
-            
-            if ($user['grade'] === 'Delegue') {
-                if ($user['validated'] === 'none') {
-                    header('Location: validation.php');
-                } elseif ($user['validated'] === 'pending') {
-                    session_destroy();
-                    header('Location: index.php?error=pending');
-                } else {
-                    header('Location: dashboard.php');
-                }
-            } elseif ($user['grade'] === 'Etudiant') {
-                header('Location: dashEtudiant.php');
-            } else {
+                
                 header('Location: dashboard.php');
+                exit();
+            } else {
+                // Comportement normal
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['name'] = $user['name'];
+                $_SESSION['grade'] = $user['grade'];
+                $_SESSION['validated'] = $user['validated'];
+                
+                if ($user['grade'] === 'Delegue' || $user['grade'] === 'Etudiant') {
+                    $_SESSION['classroom'] = $user['classroom'];
+                    
+                    // Récupération des informations supplémentaires sur la salle
+                    $stmt = $pdo->prepare("SELECT f.nom as filiere_nom 
+                                          FROM salles s 
+                                          JOIN filieres f ON s.filiere_id = f.id 
+                                          WHERE s.nom = ?");
+                    $stmt->execute([$user['classroom']]);
+                    $salle_info = $stmt->fetch();
+                    
+                    if ($salle_info) {
+                        $_SESSION['filiere'] = $salle_info['filiere_nom'];
+                    }
+                }
+                
+                // Gestion des redirections selon le grade et le statut de validation
+                if ($user['grade'] === 'Delegue') {
+                    if ($user['validated'] === 'none') {
+                        header('Location: validation.php');
+                    } elseif ($user['validated'] === 'pending') {
+                        session_destroy();
+                        header('Location: index.php?error=pending');
+                    } else {
+                        header('Location: dashboard.php');
+                    }
+                } elseif ($user['grade'] === 'Enseignant') {
+                    if ($user['validated'] === 'none') {
+                        header('Location: validation_enseignant_user.php');
+                    } elseif ($user['validated'] === 'pending') {
+                        session_destroy();
+                        header('Location: index.php?error=pending');
+                    } else {
+                        header('Location: dashboard.php');
+                    }
+                } elseif ($user['grade'] === 'Etudiant') {
+                    header('Location: dashEtudiant.php');
+                }
+                exit();
             }
-            exit();
         } else {
             $error = 'Identifiants incorrects';
         }
@@ -101,7 +140,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             justify-content: center;
             align-items: center;
         }
-        
         
         .auth-container {
             background: rgba(10, 10, 10, 0.8);
@@ -170,6 +208,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             text-align: center;
         }
         
+        .success {
+            color: #4CAF50;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background: rgba(76, 175, 80, 0.1);
+            border-radius: 4px;
+            border: 1px solid #4CAF50;
+            text-align: center;
+        }
+        
         @media (max-width: 480px) {
             .auth-container {
                 margin: 1rem;
@@ -183,6 +231,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <h1>Connexion</h1>
         <?php if (!empty($error)): ?>
             <div class="error"><?php echo $error; ?></div>
+        <?php endif; ?>
+        <?php if (isset($_GET['success']) && $_GET['success'] === 'registered'): ?>
+            <div class="success">Inscription réussie! Vous pouvez maintenant vous connecter.</div>
         <?php endif; ?>
         <form action="index.php" method="POST">
             <div class="form-group">

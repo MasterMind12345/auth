@@ -43,6 +43,11 @@
             color: #000;
         }
         
+        .badge-teacher {
+            background-color: #17a2b8;
+            color: white;
+        }
+        
         .table-responsive {
             border-radius: 10px;
             overflow: hidden;
@@ -71,6 +76,24 @@
             box-shadow: 0 0 30px rgba(0,0,0,0.05);
             margin-top: 2rem;
         }
+        
+        .dropdown-menu-wide {
+            width: 600px;
+            padding: 0;
+        }
+        
+        .tab-content {
+            padding: 15px;
+        }
+        
+        .nav-tabs .nav-link {
+            color: #495057 !important;
+        }
+        
+        .nav-tabs .nav-link.active {
+            color: #6e48aa !important;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -90,54 +113,116 @@
                             <li class="nav-item">
                                 <a class="nav-link" href="designation.php">Validation Délégués</a>
                             </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="validation_enseignant.php">Validation Enseignants</a>
+                            </li>
                         </ul>
                         <ul class="navbar-nav ms-auto">
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" href="#" id="pendingDropdown" role="button" data-bs-toggle="dropdown">
                                     Demandes en attente
                                     <?php 
-                                    $pendingCount = $pdo->query("SELECT COUNT(*) FROM users WHERE grade = 'Delegue' AND validated = 'pending'")->fetchColumn();
-                                    if ($pendingCount > 0): ?>
-                                        <span class="badge badge-pending ms-1"><?= $pendingCount ?></span>
+                                    $pendingDelegatesCount = $pdo->query("SELECT COUNT(*) FROM users WHERE grade = 'Delegue' AND validated = 'pending'")->fetchColumn();
+                                    $pendingTeachersCount = $pdo->query("SELECT COUNT(*) FROM users WHERE grade = 'Enseignant' AND validated = 'pending'")->fetchColumn();
+                                    $totalPending = $pendingDelegatesCount + $pendingTeachersCount;
+                                    if ($totalPending > 0): ?>
+                                        <span class="badge badge-pending ms-1"><?= $totalPending ?></span>
                                     <?php endif; ?>
                                 </a>
-                                <div class="dropdown-menu dropdown-menu-end" aria-labelledby="pendingDropdown" style="width: 600px; padding: 0;">
-                                    <div class="p-3">
-                                        <h6 class="dropdown-header">Délégués à valider</h6>
-                                        <?php
-                                        $pendingDelegates = $pdo->query("SELECT * FROM users WHERE grade = 'Delegue' AND validated = 'pending' LIMIT 3")->fetchAll();
-                                        if (empty($pendingDelegates)): ?>
-                                            <p class="text-muted small mb-0">Aucune demande en attente</p>
-                                        <?php else: ?>
-                                            <div class="table-responsive">
-                                                <table class="table table-sm table-hover">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>Nom</th>
-                                                            <th>Salle</th>
-                                                            <th>Actions</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        <?php foreach ($pendingDelegates as $delegate): ?>
-                                                        <tr>
-                                                            <td><?= htmlspecialchars($delegate['name']) ?></td>
-                                                            <td><?= htmlspecialchars($delegate['classroom'] ?? 'N/A') ?></td>
-                                                            <td>
-                                                                <a href="validate.php?id=<?= $delegate['id'] ?>&action=yes" class="btn btn-sm btn-validate">Valider</a>
-                                                                <a href="validate.php?id=<?= $delegate['id'] ?>&action=no" class="btn btn-sm btn-reject">Refuser</a>
-                                                            </td>
-                                                        </tr>
-                                                        <?php endforeach; ?>
-                                                    </tbody>
-                                                </table>
+                                <div class="dropdown-menu dropdown-menu-end dropdown-menu-wide" aria-labelledby="pendingDropdown">
+                                    <div class="p-0">
+                                        <ul class="nav nav-tabs" id="pendingTabs" role="tablist">
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link active" id="delegates-tab" data-bs-toggle="tab" data-bs-target="#delegates" type="button" role="tab">
+                                                    Délégués
+                                                    <?php if ($pendingDelegatesCount > 0): ?>
+                                                        <span class="badge badge-pending ms-1"><?= $pendingDelegatesCount ?></span>
+                                                    <?php endif; ?>
+                                                </button>
+                                            </li>
+                                            <li class="nav-item" role="presentation">
+                                                <button class="nav-link" id="teachers-tab" data-bs-toggle="tab" data-bs-target="#teachers" type="button" role="tab">
+                                                    Enseignants
+                                                    <?php if ($pendingTeachersCount > 0): ?>
+                                                        <span class="badge badge-teacher ms-1"><?= $pendingTeachersCount ?></span>
+                                                    <?php endif; ?>
+                                                </button>
+                                            </li>
+                                        </ul>
+                                        <div class="tab-content p-3">
+                                            <div class="tab-pane fade show active" id="delegates" role="tabpanel">
+                                                <?php
+                                                $pendingDelegates = $pdo->query("SELECT * FROM users WHERE grade = 'Delegue' AND validated = 'pending' LIMIT 3")->fetchAll();
+                                                if (empty($pendingDelegates)): ?>
+                                                    <p class="text-muted small mb-0">Aucun délégué en attente</p>
+                                                <?php else: ?>
+                                                    <div class="table-responsive">
+                                                        <table class="table table-sm table-hover">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>Nom</th>
+                                                                    <th>Salle</th>
+                                                                    <th>Actions</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <?php foreach ($pendingDelegates as $delegate): ?>
+                                                                <tr>
+                                                                    <td><?= htmlspecialchars($delegate['name']) ?></td>
+                                                                    <td><?= htmlspecialchars($delegate['classroom'] ?? 'N/A') ?></td>
+                                                                    <td>
+                                                                        <a href="validate.php?id=<?= $delegate['id'] ?>&action=yes" class="btn btn-sm btn-validate">Valider</a>
+                                                                        <a href="validate.php?id=<?= $delegate['id'] ?>&action=no" class="btn btn-sm btn-reject">Refuser</a>
+                                                                    </td>
+                                                                </tr>
+                                                                <?php endforeach; ?>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                    <?php if ($pendingDelegatesCount > 3): ?>
+                                                        <div class="text-end mt-2">
+                                                            <a href="designation.php" class="btn btn-sm btn-primary">Voir tout (<?= $pendingDelegatesCount ?>)</a>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                <?php endif; ?>
                                             </div>
-                                            <?php if ($pendingCount > 3): ?>
-                                                <div class="text-end mt-2">
-                                                    <a href="designation.php" class="btn btn-sm btn-primary">Voir tout (<?= $pendingCount ?>)</a>
-                                                </div>
-                                            <?php endif; ?>
-                                        <?php endif; ?>
+                                            <div class="tab-pane fade" id="teachers" role="tabpanel">
+                                                <?php
+                                                $pendingTeachers = $pdo->query("SELECT * FROM users WHERE grade = 'Enseignant' AND validated = 'pending' LIMIT 3")->fetchAll();
+                                                if (empty($pendingTeachers)): ?>
+                                                    <p class="text-muted small mb-0">Aucun enseignant en attente</p>
+                                                <?php else: ?>
+                                                    <div class="table-responsive">
+                                                        <table class="table table-sm table-hover">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>Nom</th>
+                                                                    <th>Téléphone</th>
+                                                                    <th>Actions</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <?php foreach ($pendingTeachers as $teacher): ?>
+                                                                <tr>
+                                                                    <td><?= htmlspecialchars($teacher['name']) ?></td>
+                                                                    <td><?= htmlspecialchars($teacher['phone']) ?></td>
+                                                                    <td>
+                                                                        <a href="validate_teacher.php?id=<?= $teacher['id'] ?>&action=yes" class="btn btn-sm btn-validate">Valider</a>
+                                                                        <a href="validate_teacher.php?id=<?= $teacher['id'] ?>&action=no" class="btn btn-sm btn-reject">Refuser</a>
+                                                                    </td>
+                                                                </tr>
+                                                                <?php endforeach; ?>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                    <?php if ($pendingTeachersCount > 3): ?>
+                                                        <div class="text-end mt-2">
+                                                            <a href="validation_enseignant.php" class="btn btn-sm btn-primary">Voir tout (<?= $pendingTeachersCount ?>)</a>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </li>

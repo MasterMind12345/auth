@@ -43,7 +43,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Ce nom est déjà utilisé';
         } else {
             $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-            $validated = ($grade === 'Enseignant') ? 'yes' : 'none';
+          // Remplacer cette ligne :
+
+$validated = 'none'; // Tous les nouveaux utilisateurs doivent être validés
             
             try {
                 if ($grade === 'Delegue' || $grade === 'Etudiant') {
