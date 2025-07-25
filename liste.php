@@ -115,14 +115,64 @@ function generatePresencePDF($seance_id, $seance, $confirmed_students, $classroo
     $pdf->SetAuthor($_SESSION['name']);
     $pdf->SetTitle("Liste de présence - Séance $seance_id");
     $pdf->SetSubject('Liste de présence');
+    
+    // Police par défaut
+    $pdf->SetFont('helvetica', '', 10);
+    
+    // Marges
+    $pdf->SetMargins(15, 15, 15);
+    $pdf->SetHeaderMargin(5);
+    $pdf->SetFooterMargin(10);
+    
+    // Ajout d'une page
     $pdf->AddPage();
     
-    // Contenu HTML
-    $html = '<h1 style="text-align:center;">Liste de Présence</h1>';
-    $html .= '<h2 style="text-align:center;">Séance du ' . date('d/m/Y', strtotime($seance['date_seance'] ?? 'now')) . '</h2>';
-    $html .= '<p><strong>Matière:</strong> ' . htmlspecialchars($seance['matiere_nom']) . ' (' . htmlspecialchars($seance['matiere_code']) . ')</p>';
-    $html .= '<p><strong>Salle:</strong> ' . htmlspecialchars($seance['salle_nom']) . ' (' . htmlspecialchars($seance['formation'] ?? 'FI') . ')</p>';
-    $html .= '<p><strong>Heure:</strong> ' . htmlspecialchars($seance['heure_debut']) . ' - ' . htmlspecialchars($seance['heure_fin']) . '</p>';
+    // Logo et en-tête
+    $header = '
+    <table cellpadding="5" border="0" width="100%">
+        <tr>
+            <td width="20%" style="text-align:center;">
+                <img src="images/logo.png" height="50" />
+            </td>
+            <td width="60%" style="text-align:center;">
+                <h1 style="color:#4b2a70;font-size:18px;">LISTE DE PRÉSENCE</h1>
+                <p style="font-size:12px;color:#555;">Séance du ' . date('d/m/Y', strtotime($seance['date_seance'] ?? 'now')) . '</p>
+            </td>
+            <td width="20%" style="text-align:center;font-size:10px;">
+                <p>Généré le ' . date('d/m/Y H:i') . '</p>
+                <p>Par ' . htmlspecialchars($_SESSION['name']) . '</p>
+            </td>
+        </tr>
+    </table>
+    <hr style="color:#7b4b9e;">';
+    
+    $pdf->writeHTML($header, true, false, true, false, '');
+    
+    // Informations de la séance
+    $info_seance = '
+    <table cellpadding="5" width="100%" style="font-size:10px;">
+        <tr>
+            <td width="25%"><strong>Matière:</strong></td>
+            <td width="25%">' . htmlspecialchars($seance['matiere_nom']) . '</td>
+            <td width="25%"><strong>Code:</strong></td>
+            <td width="25%">' . htmlspecialchars($seance['matiere_code']) . '</td>
+        </tr>
+        <tr>
+            <td><strong>Enseignant:</strong></td>
+            <td>' . htmlspecialchars($seance['enseignant_nom']) . '</td>
+            <td><strong>Salle:</strong></td>
+            <td>' . htmlspecialchars($seance['salle_nom']) . '</td>
+        </tr>
+        <tr>
+            <td><strong>Heure:</strong></td>
+            <td>' . htmlspecialchars($seance['heure_debut']) . ' - ' . htmlspecialchars($seance['heure_fin']) . '</td>
+            <td><strong>Créneau:</strong></td>
+            <td>' . htmlspecialchars($seance['jour']) . '</td>
+        </tr>
+    </table>
+    <br>';
+    
+    $pdf->writeHTML($info_seance, true, false, true, false, '');
     
     // Récupération des étudiants avec leur statut
     $query = "SELECT u.id, u.name, u.formation, f.nom as filiere, n.nom as niveau, 
@@ -139,14 +189,16 @@ function generatePresencePDF($seance_id, $seance, $confirmed_students, $classroo
     
     // Calcul des statistiques
     $stats = [
-        'FA_present' => 0,
-        'FI_present' => 0,
+        'total' => count($students),
+        'present' => 0,
         'absent' => 0,
-        'total' => count($students)
+        'FA_present' => 0,
+        'FI_present' => 0
     ];
     
     foreach ($students as $student) {
         if ($student['presence_etat'] === 'present') {
+            $stats['present']++;
             if ($student['formation'] === 'FA') {
                 $stats['FA_present']++;
             } else {
@@ -157,32 +209,37 @@ function generatePresencePDF($seance_id, $seance, $confirmed_students, $classroo
         }
     }
     
-    // Affichage des statistiques
-    $html .= '<div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;">
-                <h3 style="margin-top:0;">Statistiques de présence</h3>
-                <table style="width:100%;">
-                    <tr>
-                        <td style="width:33%;"><strong>FA Présents:</strong> ' . $stats['FA_present'] . '</td>
-                        <td style="width:33%;"><strong>FI Présents:</strong> ' . $stats['FI_present'] . '</td>
-                        <td style="width:33%;"><strong>Absents:</strong> ' . $stats['absent'] . '</td>
-                    </tr>
-                    <tr>
-                        <td colspan="3" style="padding-top:5px;"><strong>Total étudiants:</strong> ' . $stats['total'] . '</td>
-                    </tr>
-                </table>
-              </div>';
+    // Statistiques
+    $stats_html = '
+    <table cellpadding="5" width="100%" style="font-size:10px;background-color:#f5f5f5;">
+        <tr>
+            <td width="25%"><strong>Total étudiants:</strong> ' . $stats['total'] . '</td>
+            <td width="25%"><strong>Présents:</strong> ' . $stats['present'] . '</td>
+            <td width="25%"><strong>Absents:</strong> ' . $stats['absent'] . '</td>
+            <td width="25%"><strong>Taux présence:</strong> ' . round(($stats['present'] / $stats['total']) * 100) . '%</td>
+        </tr>
+    </table>
+    <br>';
     
-    $html .= '<h3>Détail des étudiants (' . $stats['total'] . ')</h3>';
-    $html .= '<table border="1" cellpadding="5" style="width:100%">
-                <tr>
-                    <th width="25%">Nom</th>
-                    <th width="15%">Formation</th>
-                    <th width="20%">Filière</th>
-                    <th width="15%">Niveau</th>
-                    <th width="15%">Présence</th>
-                </tr>';
+    $pdf->writeHTML($stats_html, true, false, true, false, '');
+    
+    // Liste des étudiants
+    $students_html = '
+    <table cellpadding="5" width="100%" border="1" style="font-size:9px;">
+        <thead>
+            <tr style="background-color:#4b2a70;color:white;">
+                <th width="5%">N°</th>
+                <th width="35%">Nom</th>
+                <th width="15%">Formation</th>
+                <th width="25%">Filière</th>
+                <th width="10%">Niveau</th>
+                <th width="10%">Présence</th>
+            </tr>
+        </thead>
+        <tbody>';
     
     $salle_formation = $seance['formation'] ?? 'FI'; // Par défaut FI si non défini
+    $counter = 1;
     
     foreach ($students as $student) {
         $presence = ($student['presence_etat'] === 'present') ? 'Présent' : 'Absent';
@@ -192,30 +249,42 @@ function generatePresencePDF($seance_id, $seance, $confirmed_students, $classroo
         $is_wrong_formation = ($salle_formation === 'FI' && $student['formation'] === 'FA') || 
                              ($salle_formation === 'FA' && $student['formation'] === 'FI');
         
-        // Style pour les étudiants en mauvaise formation (jaune avec texte en noir pour lisibilité)
-        $row_style = $is_wrong_formation ? 'background-color:#FFC107;color:#000000;' : '';
-        
-        $html .= '<tr style="'.$row_style.'">
-                    <td>' . htmlspecialchars($student['name']) . '</td>
-                    <td>' . htmlspecialchars($student['formation']) . '</td>
-                    <td>' . htmlspecialchars($student['filiere']) . '</td>
-                    <td>' . htmlspecialchars($student['niveau']) . '</td>
-                    <td style="color:' . $presence_color . ';font-weight:bold;">' . $presence . '</td>
-                </tr>';
+        $students_html .= '
+        <tr>
+            <td>' . $counter++ . '</td>
+            <td>' . htmlspecialchars($student['name']) . '</td>
+            <td>' . htmlspecialchars($student['formation']) . '</td>
+            <td>' . htmlspecialchars($student['filiere']) . '</td>
+            <td>' . htmlspecialchars($student['niveau']) . '</td>
+            <td style="color:' . $presence_color . ';font-weight:bold;text-align:center;">' . $presence . '</td>
+        </tr>';
     }
     
-    $html .= '</table>';
+    $students_html .= '
+        </tbody>
+    </table>';
     
-    // Légende pour expliquer la couleur jaune
-    $html .= '<div style="margin-top: 10px; padding: 5px; background-color: #FFC107; color: #000000; display: inline-block;">
-                <i class="fas fa-info-circle"></i> Étudiant en formation ' . ($salle_formation === 'FI' ? 'FA' : 'FI') . ' dans une salle ' . $salle_formation . '
-              </div>';
+    $pdf->writeHTML($students_html, true, false, true, false, '');
     
-    // Pied de page
-    $html .= '<p style="margin-top:20px;text-align:right;">Généré le ' . date('d/m/Y H:i') . ' par ' . htmlspecialchars($_SESSION['name']) . '</p>';
+    // Notes et signature
+    $notes = '
+    <br><br>
+    <table cellpadding="5" width="100%" style="font-size:9px;">
+        <tr>
+            <td width="50%">
+                <p><strong>Notes:</strong></p>
+                <p>- Les étudiants en formation différente de la salle sont marqués en jaune</p>
+                <p>- Document généré automatiquement</p>
+            </td>
+            <td width="50%" style="text-align:center;">
+                <p>Signature du délégué</p>
+                <br><br><br>
+                <p>........................................</p>
+            </td>
+        </tr>
+    </table>';
     
-    // Ajout du contenu
-    $pdf->writeHTML($html, true, false, true, false, '');
+    $pdf->writeHTML($notes, true, false, true, false, '');
     
     // Génération du fichier
     $filename = 'presence_seance_' . $seance_id . '_' . date('Ymd_His') . '.pdf';

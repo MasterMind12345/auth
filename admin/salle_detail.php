@@ -33,7 +33,59 @@ $cours = $pdo->query("SELECT c.id, m.nom as matiere_nom
 
 // Récupérer la liste des enseignants
 $enseignants = $pdo->query("SELECT id, name FROM users WHERE grade = 'Enseignant'")->fetchAll();
+
+// Traitement de la demande de vidage de la salle
+if (isset($_POST['vider_salle'])) {
+    try {
+        $pdo->beginTransaction();
+        
+        // Désactiver temporairement les contraintes de clé étrangère
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+        
+        // 1. Supprimer toutes les présences associées aux séances de cette salle
+        $stmt = $pdo->prepare("DELETE pe FROM presences_etudiants pe 
+                              JOIN seances s ON pe.seance_id = s.id 
+                              WHERE s.salle_id = ?");
+        $stmt->execute([$salle_id]);
+        
+        // 2. Supprimer tous les pushes associés aux séances de cette salle
+        $stmt = $pdo->prepare("DELETE p FROM pushes p 
+                              JOIN seances s ON p.seance_id = s.id 
+                              WHERE s.salle_id = ?");
+        $stmt->execute([$salle_id]);
+        
+        // 3. Supprimer toutes les promotions temporaires associées aux séances de cette salle
+        $stmt = $pdo->prepare("DELETE pt FROM promotions_temporaires pt 
+                              JOIN seances s ON pt.promoteur_id = s.enseignant_id 
+                              WHERE s.salle_id = ?");
+        $stmt->execute([$salle_id]);
+        
+        // 4. Supprimer toutes les séances de cette salle
+        $stmt = $pdo->prepare("DELETE FROM seances WHERE salle_id = ?");
+        $stmt->execute([$salle_id]);
+        
+        // 5. Supprimer tous les emplois du temps associés à cette salle
+        $stmt = $pdo->prepare("DELETE FROM emplois_temps WHERE salle_id = ?");
+        $stmt->execute([$salle_id]);
+        
+        // Réactiver les contraintes de clé étrangère
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+        
+        $pdo->commit();
+        
+        // Rafraîchir la page pour voir les changements
+        header("Location: salle_detail.php?id=$salle_id&success=La programmation de la salle a été réinitialisée avec succès");
+        exit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        // S'assurer que les contraintes sont réactivées même en cas d'erreur
+        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+        header("Location: salle_detail.php?id=$salle_id&error=Erreur lors de la réinitialisation: " . $e->getMessage());
+        exit();
+    }
+}
 ?>
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -43,34 +95,297 @@ $enseignants = $pdo->query("SELECT id, name FROM users WHERE grade = 'Enseignant
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="../assets/css/style.css" rel="stylesheet">
     <style>
-        .seance-card {
-            background: linear-gradient(135deg, rgba(110, 72, 170, 0.2), rgba(20, 20, 20, 0.8));
-            border: 1px solid #6e48aa;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-        .seance-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(110, 72, 170, 0.3);
-        }
-        .jour-section {
-            margin-bottom: 30px;
-            border-bottom: 1px solid #6e48aa;
-            padding-bottom: 10px;
-        }
-        .badge-formation {
-            background-color: #6e48aa;
-            font-size: 0.8rem;
-        }
-        .btn-add-seance {
-            background: linear-gradient(135deg, #6e48aa, #9b72cf);
-            border: none;
-            font-weight: bold;
-        }
-        .btn-add-seance:hover {
-            background: linear-gradient(135deg, #9b72cf, #6e48aa);
-        }
+/* Fond cosmique animé */
+body.admin-body {
+    background: 
+        radial-gradient(circle at 20% 30%, rgba(41, 5, 82, 0.8) 0%, transparent 25%),
+        radial-gradient(circle at 80% 70%, rgba(0, 87, 146, 0.6) 0%, transparent 25%),
+        linear-gradient(135deg, #0f0c29 0%, #1a1a3a 50%, #24243e 100%);
+    background-size: 400% 400%;
+    animation: cosmicBackground 20s ease infinite;
+    min-height: 100vh;
+    color: #e0e0e0;
+    font-family: 'Poppins', 'Segoe UI', sans-serif;
+    overflow-x: hidden;
+}
+
+@keyframes cosmicBackground {
+    0% { background-position: 0% 0%; }
+    50% { background-position: 100% 100%; }
+    100% { background-position: 0% 0%; }
+}
+
+/* Effet d'étoiles */
+body.admin-body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: 
+        radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.8) 1px, transparent 1px),
+        radial-gradient(circle at 80% 70%, rgba(255, 255, 255, 0.6) 1px, transparent 1px),
+        radial-gradient(circle at 40% 80%, rgba(255, 255, 255, 0.7) 1px, transparent 1px);
+    background-size: 200px 200px;
+    z-index: -1;
+    animation: twinkle 10s linear infinite;
+}
+
+@keyframes twinkle {
+    0%, 100% { opacity: 0.8; }
+    50% { opacity: 0.3; }
+}
+
+/* Cartes modernes avec effet de verre */
+.card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+}
+
+.card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(110, 72, 170, 0.1) 0%, rgba(0, 0, 0, 0) 100%);
+    z-index: -1;
+    border-radius: inherit;
+}
+
+.card:hover {
+    transform: translateY(-5px) scale(1.01);
+    box-shadow: 0 12px 40px rgba(110, 72, 170, 0.4);
+    border-color: rgba(110, 72, 170, 0.3);
+}
+
+/* Section des séances - parfaitement lisible */
+.seance-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    margin-bottom: 15px;
+    transition: all 0.4s ease;
+    position: relative;
+    overflow: hidden;
+    color: #ffffff;
+}
+
+.seance-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: 0.6s;
+}
+
+.seance-card:hover::after {
+    left: 100%;
+}
+
+.seance-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(110, 72, 170, 0.3);
+    border-color: rgba(110, 72, 170, 0.4);
+}
+
+.seance-card .card-body {
+    padding: 1.5rem;
+}
+
+.seance-card .card-title {
+    color: #ffffff;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.seance-card .card-text {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.9rem;
+}
+
+.seance-card .text-muted {
+    color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Titres avec effet néon amélioré */
+.neon-violet {
+    color: #fff;
+    text-shadow: 
+        0 0 5px rgba(155, 114, 207, 0.8),
+        0 0 10px rgba(110, 72, 170, 0.6),
+        0 0 15px rgba(110, 72, 170, 0.4),
+        0 0 20px rgba(110, 72, 170, 0.2);
+    position: relative;
+    display: inline-block;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.neon-violet::after {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #9b72cf, #6e48aa, transparent);
+    animation: neonGlow 3s linear infinite;
+    background-size: 200% 100%;
+}
+
+@keyframes neonGlow {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* Boutons futuristes */
+.btn-add-seance {
+    background: linear-gradient(135deg, rgba(110, 72, 170, 0.8) 0%, rgba(155, 114, 207, 0.8) 100%);
+    border: none;
+    border-radius: 50px;
+    padding: 12px 30px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    box-shadow: 0 4px 15px rgba(110, 72, 170, 0.4);
+    transition: all 0.4s ease;
+    position: relative;
+    overflow: hidden;
+    color: white;
+}
+
+.btn-add-seance::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: 0.5s;
+}
+
+.btn-add-seance:hover::before {
+    left: 100%;
+}
+
+.btn-add-seance:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(110, 72, 170, 0.6);
+}
+
+/* Sections jour avec séparateurs cosmiques */
+.jour-section {
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    position: relative;
+}
+
+.jour-section h4 {
+    color: #9b72cf;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+    position: relative;
+    font-weight: 600;
+}
+
+.jour-section h4::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(110, 72, 170, 0.5), transparent);
+}
+
+/* Formulaires transparents */
+.form-control {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+    border-radius: 8px;
+    padding: 10px 15px;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: #6e48aa;
+    box-shadow: 0 0 0 0.25rem rgba(110, 72, 170, 0.25);
+    color: #ffffff;
+}
+
+/* Badges */
+.badge-formation {
+    background: linear-gradient(135deg, #6e48aa, #9b72cf);
+    font-size: 0.75rem;
+    padding: 6px 12px;
+    border-radius: 50px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    box-shadow: 0 3px 10px rgba(110, 72, 170, 0.3);
+    vertical-align: middle;
+    margin-left: 10px;
+}
+
+/* Animation des éléments */
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.card, .jour-section, .seance-card {
+    animation: fadeInUp 0.6s ease forwards;
+    opacity: 0;
+}
+
+.jour-section:nth-child(1) { animation-delay: 0.1s; }
+.jour-section:nth-child(2) { animation-delay: 0.2s; }
+.jour-section:nth-child(3) { animation-delay: 0.3s; }
+.jour-section:nth-child(4) { animation-delay: 0.4s; }
+.jour-section:nth-child(5) { animation-delay: 0.5s; }
+.jour-section:nth-child(6) { animation-delay: 0.6s; }
+.jour-section:nth-child(7) { animation-delay: 0.7s; }
+
+/* Effet de flottement pour les cartes de séance */
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+
+.seance-card:hover {
+    animation: float 3s ease-in-out infinite;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .card {
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+    }
+    
+    .seance-card {
+        padding: 1rem;
+    }
+}
     </style>
 </head>
 <body class="admin-body">
@@ -80,7 +395,12 @@ $enseignants = $pdo->query("SELECT id, name FROM users WHERE grade = 'Enseignant
                 Salle <?= htmlspecialchars($salle['nom']) ?> 
                 <span class="badge badge-formation"><?= $salle['formation'] == 'FI' ? 'Formation Initiale' : 'Formation Alternance' ?></span>
             </h1>
-            <a href="filiere.php?id=<?= $salle['filiere_id'] ?>" class="btn btn-dark">Retour</a>
+            <div>
+                <a href="filiere.php?id=<?= $salle['filiere_id'] ?>" class="btn btn-dark">Retour</a>
+                <button type="button" class="btn btn-vider ms-2" data-bs-toggle="modal" data-bs-target="#viderModal">
+                    Vider la salle
+                </button>
+            </div>
         </div>
         
         <div class="row">
@@ -216,6 +536,36 @@ $enseignants = $pdo->query("SELECT id, name FROM users WHERE grade = 'Enseignant
                         <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de confirmation pour vider la salle -->
+    <div class="modal fade" id="viderModal" tabindex="-1" aria-labelledby="viderModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-white">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="viderModalLabel">Confirmer la réinitialisation</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger">
+                        <strong>Attention !</strong> Cette action est irréversible et supprimera définitivement :
+                        <ul>
+                            <li>Toutes les séances programmées dans cette salle</li>
+                            <li>Tous les enregistrements de présence associés</li>
+                            <li>Tous les pushes de validation associés</li>
+                            <li>Tous les emplois du temps associés</li>
+                        </ul>
+                    </div>
+                    <p>Êtes-vous absolument sûr de vouloir continuer ?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                    <form method="post" action="">
+                        <button type="submit" name="vider_salle" class="btn btn-danger">Confirmer la suppression</button>
+                    </form>
+                </div>
             </div>
         </div>
     </div>

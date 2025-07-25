@@ -363,7 +363,16 @@ $taux_global = ($total_programme > 0) ? round(($total_effectue / $total_programm
                 </div>
             </div>
         </div>
+        
     </div>
+    
 </div>
-
+<div class="col-md-3 text-end">
+    <a href="?export=pdf<?= !empty($niveau_id) ? '&niveau_filter='.$niveau_id : '' ?><?= !empty($search) ? '&search='.urlencode($search) : '' ?>" class="btn btn-danger me-2">
+        <i class="fas fa-file-pdf me-2"></i> Exporter
+    </a>
+    <a href="gestion_tarifs.php" class="btn btn-success">
+        <i class="fas fa-money-bill-wave me-2"></i> Gestion Tarifs
+    </a>
+</div>
 <?php include 'includes/admin-footer.php'; ?>
