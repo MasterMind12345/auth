@@ -1,24 +1,46 @@
 <?php
+session_start();
 require 'includes/db.php';
-include 'includes/admin-header.php';
 
-// Gestion des actions
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['update_tarif'])) {
-        $niveau_id = $_POST['niveau_id'];
-        $tarif_heure = $_POST['tarif_heure'];
-        
-        $stmt = $pdo->prepare("INSERT INTO tarifs_heures (niveau_id, tarif_heure) 
-                              VALUES (:niveau_id, :tarif_heure)
-                              ON DUPLICATE KEY UPDATE tarif_heure = :tarif_heure");
-        $stmt->execute([':niveau_id' => $niveau_id, ':tarif_heure' => $tarif_heure]);
-        
-        $_SESSION['message'] = "Tarif mis à jour avec succès";
-        $_SESSION['message_type'] = "success";
-        header("Location: gestion_tarifs.php");
-        exit();
+// Gestion des actions AVANT tout affichage HTML
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_tarif'])) {
+    $niveau_id = $_POST['niveau_id'];
+    $tarif_heure = $_POST['tarif_heure'];
+    
+    // Validation des données
+    if (!is_numeric($tarif_heure) || $tarif_heure < 0) {
+        $_SESSION['message'] = "Le tarif doit être un nombre positif";
+        $_SESSION['message_type'] = "danger";
+    } else {
+        try {
+            // Vérifier d'abord si le tarif existe déjà
+            $check = $pdo->prepare("SELECT COUNT(*) FROM tarifs_heures WHERE niveau_id = ?");
+            $check->execute([$niveau_id]);
+            $exists = $check->fetchColumn();
+            
+            if ($exists) {
+                // Mise à jour si le tarif existe déjà
+                $stmt = $pdo->prepare("UPDATE tarifs_heures SET tarif_heure = ? WHERE niveau_id = ?");
+                $stmt->execute([$tarif_heure, $niveau_id]);
+            } else {
+                // Insertion si le tarif n'existe pas encore
+                $stmt = $pdo->prepare("INSERT INTO tarifs_heures (niveau_id, tarif_heure) VALUES (?, ?)");
+                $stmt->execute([$niveau_id, $tarif_heure]);
+            }
+            
+            $_SESSION['message'] = "Tarif mis à jour avec succès";
+            $_SESSION['message_type'] = "success";
+        } catch (PDOException $e) {
+            $_SESSION['message'] = "Erreur lors de la mise à jour: " . $e->getMessage();
+            $_SESSION['message_type'] = "danger";
+        }
     }
+    header("Location: gestion_tarifs.php");
+    exit();
 }
+
+// Inclure le header après le traitement des actions
+include 'includes/admin-header.php';
 
 // Récupérer les niveaux et leurs tarifs
 $tarifs = $pdo->query("SELECT n.id, n.nom, t.tarif_heure 
@@ -44,34 +66,32 @@ $tarifs = $pdo->query("SELECT n.id, n.nom, t.tarif_heure
 
     <div class="card shadow-sm mb-5">
         <div class="card-body">
-            <form method="post">
-                <table class="table table-bordered">
-                    <thead class="table-dark">
-                        <tr>
-                            <th>Niveau</th>
-                            <th>Tarif par heure (FCFA)</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($tarifs as $tarif): ?>
-                        <tr>
-                            <td><?= htmlspecialchars($tarif['nom']) ?></td>
-                            <td>
-                                <input type="number" name="tarif_heure" class="form-control" 
+            <table class="table table-bordered">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Niveau</th>
+                        <th>Tarif par heure (FCFA)</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($tarifs as $tarif): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($tarif['nom']) ?></td>
+                        <td>
+                            <form method="post" class="d-flex">
+                                <input type="number" name="tarif_heure" class="form-control me-2" 
                                        value="<?= $tarif['tarif_heure'] ?? 0 ?>" step="0.01" min="0" required>
-                            </td>
-                            <td>
                                 <input type="hidden" name="niveau_id" value="<?= $tarif['id'] ?>">
                                 <button type="submit" name="update_tarif" class="btn btn-primary">
                                     <i class="fas fa-save"></i> Enregistrer
                                 </button>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </form>
+                            </form>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 

@@ -3,7 +3,6 @@ include 'includes/db.php';
 
 $salle_id = $_GET['id'] ?? 0;
 
-// Récupérer les informations de la salle
 $stmt = $pdo->prepare("SELECT s.*, f.nom as filiere_nom, n.nom as niveau_nom 
                       FROM salles s 
                       JOIN filieres f ON s.filiere_id = f.id 
@@ -12,10 +11,8 @@ $stmt = $pdo->prepare("SELECT s.*, f.nom as filiere_nom, n.nom as niveau_nom
 $stmt->execute([$salle_id]);
 $salle = $stmt->fetch();
 
-// Récupérer la semaine sélectionnée pour le rapport (si elle existe)
 $semaine_id = $_GET['semaine_id'] ?? 0;
 
-// Récupérer les séances de cours pour cette salle
 $stmt = $pdo->prepare("SELECT sc.*, m.nom as matiere_nom, u.name as enseignant_nom
                       FROM seances sc
                       JOIN cours c ON sc.cours_id = c.id
@@ -26,59 +23,50 @@ $stmt = $pdo->prepare("SELECT sc.*, m.nom as matiere_nom, u.name as enseignant_n
 $stmt->execute([$salle_id]);
 $seances = $stmt->fetchAll();
 
-// Récupérer la liste des cours disponibles
+// Requête corrigée pour éviter la redondance des noms de matière
+// GROUP BY m.nom s'assure que chaque matière n'apparaît qu'une seule fois
 $cours = $pdo->query("SELECT c.id, m.nom as matiere_nom 
                      FROM cours c 
-                     JOIN matieres m ON c.matiere_id = m.id")->fetchAll();
+                     JOIN matieres m ON c.matiere_id = m.id 
+                     GROUP BY m.nom")->fetchAll();
 
-// Récupérer la liste des enseignants
 $enseignants = $pdo->query("SELECT id, name FROM users WHERE grade = 'Enseignant'")->fetchAll();
 
-// Traitement de la demande de vidage de la salle
 if (isset($_POST['vider_salle'])) {
     try {
         $pdo->beginTransaction();
         
-        // Désactiver temporairement les contraintes de clé étrangère
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
         
-        // 1. Supprimer toutes les présences associées aux séances de cette salle
         $stmt = $pdo->prepare("DELETE pe FROM presences_etudiants pe 
                               JOIN seances s ON pe.seance_id = s.id 
                               WHERE s.salle_id = ?");
         $stmt->execute([$salle_id]);
         
-        // 2. Supprimer tous les pushes associés aux séances de cette salle
         $stmt = $pdo->prepare("DELETE p FROM pushes p 
                               JOIN seances s ON p.seance_id = s.id 
                               WHERE s.salle_id = ?");
         $stmt->execute([$salle_id]);
         
-        // 3. Supprimer toutes les promotions temporaires associées aux séances de cette salle
         $stmt = $pdo->prepare("DELETE pt FROM promotions_temporaires pt 
                               JOIN seances s ON pt.promoteur_id = s.enseignant_id 
                               WHERE s.salle_id = ?");
         $stmt->execute([$salle_id]);
         
-        // 4. Supprimer toutes les séances de cette salle
         $stmt = $pdo->prepare("DELETE FROM seances WHERE salle_id = ?");
         $stmt->execute([$salle_id]);
         
-        // 5. Supprimer tous les emplois du temps associés à cette salle
         $stmt = $pdo->prepare("DELETE FROM emplois_temps WHERE salle_id = ?");
         $stmt->execute([$salle_id]);
         
-        // Réactiver les contraintes de clé étrangère
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
         
         $pdo->commit();
         
-        // Rafraîchir la page pour voir les changements
         header("Location: salle_detail.php?id=$salle_id&success=La programmation de la salle a été réinitialisée avec succès");
         exit();
     } catch (PDOException $e) {
         $pdo->rollBack();
-        // S'assurer que les contraintes sont réactivées même en cas d'erreur
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
         header("Location: salle_detail.php?id=$salle_id&error=Erreur lors de la réinitialisation: " . $e->getMessage());
         exit();
@@ -95,7 +83,6 @@ if (isset($_POST['vider_salle'])) {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="../assets/css/style.css" rel="stylesheet">
     <style>
-/* Fond cosmique animé */
 body.admin-body {
     background: 
         radial-gradient(circle at 20% 30%, rgba(41, 5, 82, 0.8) 0%, transparent 25%),
@@ -115,7 +102,6 @@ body.admin-body {
     100% { background-position: 0% 0%; }
 }
 
-/* Effet d'étoiles */
 body.admin-body::before {
     content: '';
     position: fixed;
@@ -137,7 +123,6 @@ body.admin-body::before {
     50% { opacity: 0.3; }
 }
 
-/* Cartes modernes avec effet de verre */
 .card {
     background: rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(12px);
@@ -169,7 +154,6 @@ body.admin-body::before {
     border-color: rgba(110, 72, 170, 0.3);
 }
 
-/* Section des séances - parfaitement lisible */
 .seance-card {
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
     backdrop-filter: blur(10px);
@@ -223,7 +207,6 @@ body.admin-body::before {
     color: rgba(255, 255, 255, 0.6) !important;
 }
 
-/* Titres avec effet néon amélioré */
 .neon-violet {
     color: #fff;
     text-shadow: 
@@ -254,7 +237,6 @@ body.admin-body::before {
     100% { background-position: -200% 0; }
 }
 
-/* Boutons futuristes */
 .btn-add-seance {
     background: linear-gradient(135deg, rgba(110, 72, 170, 0.8) 0%, rgba(155, 114, 207, 0.8) 100%);
     border: none;
@@ -290,11 +272,12 @@ body.admin-body::before {
     box-shadow: 0 8px 25px rgba(110, 72, 170, 0.6);
 }
 
-/* Sections jour avec séparateurs cosmiques */
 .jour-section {
     margin-bottom: 30px;
     padding-bottom: 20px;
     position: relative;
+    
+
 }
 
 .jour-section h4 {
@@ -315,7 +298,6 @@ body.admin-body::before {
     background: linear-gradient(90deg, transparent, rgba(110, 72, 170, 0.5), transparent);
 }
 
-/* Formulaires transparents */
 .form-control {
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.15);
@@ -332,7 +314,6 @@ body.admin-body::before {
     color: #ffffff;
 }
 
-/* Badges */
 .badge-formation {
     background: linear-gradient(135deg, #6e48aa, #9b72cf);
     font-size: 0.75rem;
@@ -346,7 +327,6 @@ body.admin-body::before {
     margin-left: 10px;
 }
 
-/* Animation des éléments */
 @keyframes fadeInUp {
     from { opacity: 0; transform: translateY(30px); }
     to { opacity: 1; transform: translateY(0); }
@@ -365,7 +345,6 @@ body.admin-body::before {
 .jour-section:nth-child(6) { animation-delay: 0.6s; }
 .jour-section:nth-child(7) { animation-delay: 0.7s; }
 
-/* Effet de flottement pour les cartes de séance */
 @keyframes float {
     0%, 100% { transform: translateY(0); }
     50% { transform: translateY(-8px); }
@@ -375,7 +354,6 @@ body.admin-body::before {
     animation: float 3s ease-in-out infinite;
 }
 
-/* Responsive adjustments */
 @media (max-width: 768px) {
     .card {
         backdrop-filter: blur(8px);
@@ -416,7 +394,6 @@ body.admin-body::before {
                     </div>
                 </div>
                 
-                <!-- Bouton pour générer le rapport -->
                 <div class="card bg-dark text-white mt-4">
                     <div class="card-body">
                         <h5 class="card-title">Générer le rapport hebdomadaire</h5>
@@ -424,7 +401,7 @@ body.admin-body::before {
                             <input type="hidden" name="salle_id" value="<?= $salle_id ?>">
                             <div class="mb-3">
                                 <label for="semaine_id" class="form-label">Semaine</label>
-                                <select class="form-control" id="semaine_id" name="semaine_id" required>
+                                <select style="background-color:#444;"  class="form-control" id="semaine_id" name="semaine_id" required>
                                     <?php 
                                     $semaines = $pdo->query("SELECT * FROM semaines ORDER BY numero")->fetchAll();
                                     foreach ($semaines as $s): ?>
@@ -439,7 +416,6 @@ body.admin-body::before {
                     </div>
                 </div>
 
-                <!-- Formulaire pour ajouter une séance -->
                 <div class="card bg-dark text-white mt-4">
                     <div class="card-body">
                         <h5 class="card-title">Ajouter une séance</h5>
@@ -449,7 +425,7 @@ body.admin-body::before {
                             
                             <div class="mb-3">
                                 <label for="cours_id" class="form-label">Cours</label>
-                                <select class="form-control" id="cours_id" name="cours_id" required>
+                                <select style="background-color:#444;"  class="form-control" id="cours_id" name="cours_id" required>
                                     <?php foreach ($cours as $c): ?>
                                         <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['matiere_nom']) ?></option>
                                     <?php endforeach; ?>
@@ -458,7 +434,7 @@ body.admin-body::before {
                             
                             <div class="mb-3">
                                 <label for="jour" class="form-label">Jour</label>
-                                <select class="form-control" id="jour" name="jour" required>
+                                <select style="background-color:#444;" class="form-control" id="jour" name="jour" required>
                                     <option value="LUNDI">Lundi</option>
                                     <option value="MARDI">Mardi</option>
                                     <option value="MERCREDI">Mercredi</option>
@@ -482,7 +458,7 @@ body.admin-body::before {
                             
                             <div class="mb-3">
                                 <label for="enseignant_id" class="form-label">Enseignant</label>
-                                <select class="form-control" id="enseignant_id" name="enseignant_id" required>
+                                <select style="background-color:#444;" class="form-control" id="enseignant_id" name="enseignant_id" required>
                                     <?php foreach ($enseignants as $e): ?>
                                         <option value="<?= $e['id'] ?>"><?= htmlspecialchars($e['name']) ?></option>
                                     <?php endforeach; ?>
@@ -540,7 +516,6 @@ body.admin-body::before {
         </div>
     </div>
 
-    <!-- Modal de confirmation pour vider la salle -->
     <div class="modal fade" id="viderModal" tabindex="-1" aria-labelledby="viderModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content bg-dark text-white">
@@ -573,7 +548,6 @@ body.admin-body::before {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
-        // Gestion des messages de succès/erreur
         <?php if (isset($_GET['success'])): ?>
             Swal.fire({
                 icon: 'success',
@@ -590,7 +564,6 @@ body.admin-body::before {
             });
         <?php endif; ?>
 
-        // Mettre à jour la semaine sélectionnée dans le formulaire d'ajout de séance
         document.getElementById('semaine_id').addEventListener('change', function() {
             document.querySelector('input[name="semaine_id"]').value = this.value;
         });

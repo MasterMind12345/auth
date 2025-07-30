@@ -13,7 +13,7 @@ if (isset($_GET['export'])) {
     $query = "SELECT 
                 u.id, u.name, u.phone,
                 SUM(TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin)) as heures_programmees,
-                SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_effectuees,
+                SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(MINUTE, s.debut_reel, s.fin_reelle)/60 ELSE 0 END) as heures_effectuees,
                 SUM(CASE WHEN s.etat_final = 'absent' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_absentes,
                 GROUP_CONCAT(DISTINCT f.nom ORDER BY f.nom SEPARATOR ', ') as filieres,
                 GROUP_CONCAT(DISTINCT n.nom ORDER BY n.nom SEPARATOR ', ') as niveaux
@@ -83,7 +83,7 @@ if (isset($_GET['export'])) {
                     <td>'.htmlspecialchars($enseignant['name']).'</td>
                     <td>'.htmlspecialchars($enseignant['phone']).'</td>
                     <td>'.($enseignant['heures_programmees'] ?? 0).'h</td>
-                    <td>'.($enseignant['heures_effectuees'] ?? 0).'h</td>
+                    <td>'.number_format($enseignant['heures_effectuees'] ?? 0, 2, ',', ' ').'h</td>
                     <td>'.($enseignant['heures_absentes'] ?? 0).'h</td>
                     <td>'.$taux_presence.'%</td>
                     <td>'.htmlspecialchars($enseignant['filieres'] ?? 'N/A').'</td>
@@ -140,7 +140,7 @@ $niveaux = $stmt_niveaux->fetchAll();
 $query = "SELECT 
             u.id, u.name, u.phone,
             SUM(TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin)) as heures_programmees,
-            SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_effectuees,
+            SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(MINUTE, s.debut_reel, s.fin_reelle)/60 ELSE 0 END) as heures_effectuees,
             SUM(CASE WHEN s.etat_final = 'absent' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_absentes,
             GROUP_CONCAT(DISTINCT f.nom ORDER BY f.nom SEPARATOR ', ') as filieres,
             GROUP_CONCAT(DISTINCT n.nom ORDER BY n.nom SEPARATOR ', ') as niveaux
@@ -294,7 +294,7 @@ $taux_global = ($total_programme > 0) ? round(($total_effectue / $total_programm
                             <td><?= htmlspecialchars($enseignant['name']) ?></td>
                             <td><?= htmlspecialchars($enseignant['phone']) ?></td>
                             <td><?= $enseignant['heures_programmees'] ?? 0 ?>h</td>
-                            <td><?= $enseignant['heures_effectuees'] ?? 0 ?>h</td>
+                            <td><?= number_format($enseignant['heures_effectuees'] ?? 0, 2, ',', ' ') ?>h</td>
                             <td><?= $enseignant['heures_absentes'] ?? 0 ?>h</td>
                             <td>
                                 <span class="badge bg-<?= $taux_presence >= 90 ? 'success' : ($taux_presence >= 70 ? 'warning' : 'danger') ?>">
@@ -343,7 +343,7 @@ $taux_global = ($total_programme > 0) ? round(($total_effectue / $total_programm
             <div class="card bg-success text-white shadow-sm">
                 <div class="card-body">
                     <h5 class="card-title">Effectuées</h5>
-                    <p class="card-text display-6"><?= $total_effectue ?>h</p>
+                    <p class="card-text display-6"><?= number_format($total_effectue, 2, ',', ' ') ?>h</p>
                 </div>
             </div>
         </div>

@@ -664,6 +664,15 @@ function getCurrentWeek($pdo){
         </div>
         <?php if (isTeacher()): ?>
 <div class="card">
+    <h2><i class="fas fa-money-bill-wave"></i> Gestion des Salaires</h2>
+    <a href="salaireprof.php" class="status-btn" style="background-color: #4CAF50;">
+        <i class="fas fa-chart-line"></i> Suivi de mon salaire
+    </a>
+</div>
+<?php endif; ?>
+
+        <?php if (isTeacher()): ?>
+<div class="card">
     <h2><i class="fas fa-user-graduate"></i> Gestion des Étudiants</h2>
     <a href="promotion_temporaire.php" class="status-btn" style="background-color: #9c27b0;">
         <i class="fas fa-user-shield"></i> Promotions Temporaires

@@ -10,10 +10,12 @@ if (isset($_GET['export'])) {
     
     $niveau_id = $_GET['niveau_filter'] ?? null;
     
-    // Requête pour calculer les salaires
+    // Requête pour calculer les salaires avec les heures réelles
     $query = "SELECT 
                 u.id, u.name, u.phone,
-                SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_effectuees,
+                SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(MINUTE, s.debut_reel, s.fin_reelle)/60 ELSE 0 END) as heures_effectuees,
+                SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(MINUTE, s.heure_debut, s.heure_fin)/60 ELSE 0 END) as heures_prevues,
+                SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(MINUTE, s.heure_debut, s.debut_reel) ELSE 0 END) as retard_minutes,
                 GROUP_CONCAT(DISTINCT n.id ORDER BY n.id) as niveau_ids,
                 GROUP_CONCAT(DISTINCT n.nom ORDER BY n.nom SEPARATOR ', ') as niveaux,
                 GROUP_CONCAT(DISTINCT t.tarif_heure ORDER BY n.id) as tarifs
@@ -41,20 +43,31 @@ if (isset($_GET['export'])) {
     $stmt->execute();
     $enseignants = $stmt->fetchAll();
 
-    // Calcul des salaires
+    // Calcul des salaires basé sur les heures réellement effectuées
     foreach ($enseignants as &$enseignant) {
         $niveau_ids = explode(',', $enseignant['niveau_ids']);
         $tarifs = explode(',', $enseignant['tarifs']);
         
         $salaire_total = 0;
-        $heures_par_niveau = [];
         
         if (!empty($enseignant['heures_effectuees']) && !empty($tarifs[0])) {
+            // Répartition des heures par niveau
             $heures_par_niveau = array_fill_keys($niveau_ids, $enseignant['heures_effectuees'] / count($niveau_ids));
             
             foreach ($heures_par_niveau as $n_id => $heures) {
                 $tarif = $tarifs[array_search($n_id, $niveau_ids)];
-                $salaire_total += $heures * $tarif;
+                
+                // Calcul des heures complètes et minutes restantes
+                $heures_completes = floor($heures);
+                $minutes_restantes = ($heures - $heures_completes) * 60;
+                
+                // Paiement des heures complètes
+                $salaire_total += $heures_completes * $tarif;
+                
+                // Paiement des minutes restantes (à moitié)
+                if ($minutes_restantes > 0) {
+                    $salaire_total += ($minutes_restantes * ($tarif/60)) / 2;
+                }
             }
         }
         
@@ -100,6 +113,8 @@ if (isset($_GET['export'])) {
                     <th>Nom</th>
                     <th>Téléphone</th>
                     <th>Heures effectuées</th>
+                    <th>Heures prévues</th>
+                    <th>Retard moyen (min)</th>
                     <th>Niveaux</th>
                     <th>Salaire total (FCFA)</th>
                 </tr>';
@@ -108,7 +123,9 @@ if (isset($_GET['export'])) {
         $html .= '<tr>
                     <td>'.htmlspecialchars($enseignant['name']).'</td>
                     <td>'.htmlspecialchars($enseignant['phone']).'</td>
-                    <td>'.($enseignant['heures_effectuees'] ?? 0).'h</td>
+                    <td>'.number_format($enseignant['heures_effectuees'] ?? 0, 2, ',', ' ').'h</td>
+                    <td>'.number_format($enseignant['heures_prevues'] ?? 0, 2, ',', ' ').'h</td>
+                    <td>'.round($enseignant['retard_minutes'] / max(1, $enseignant['heures_effectuees']), 1).'</td>
                     <td>'.htmlspecialchars($enseignant['niveaux'] ?? 'N/A').'</td>
                     <td>'.number_format($enseignant['salaire'] ?? 0, 2, ',', ' ').'</td>
                 </tr>';
@@ -116,7 +133,9 @@ if (isset($_GET['export'])) {
 
     $html .= '<tr class="total-row">
                     <td colspan="2">Totaux</td>
-                    <td>'.$total_heures.'h</td>
+                    <td>'.number_format($total_heures, 2, ',', ' ').'h</td>
+                    <td></td>
+                    <td></td>
                     <td></td>
                     <td>'.number_format($total_salaires, 2, ',', ' ').' FCFA</td>
                 </tr>';
@@ -137,10 +156,12 @@ $niveau_id = $_GET['niveau_filter'] ?? null;
 // Récupérer les niveaux pour le filtre
 $niveaux = $pdo->query("SELECT * FROM niveaux ORDER BY nom")->fetchAll();
 
-// Requête pour calculer les salaires
+// Requête pour calculer les salaires avec les heures réelles
 $query = "SELECT 
             u.id, u.name, u.phone,
-            SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(HOUR, c.heure_debut, c.heure_fin) ELSE 0 END) as heures_effectuees,
+            SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(MINUTE, s.debut_reel, s.fin_reelle)/60 ELSE 0 END) as heures_effectuees,
+            SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(MINUTE, s.heure_debut, s.heure_fin)/60 ELSE 0 END) as heures_prevues,
+            SUM(CASE WHEN s.etat_final = 'present' THEN TIMESTAMPDIFF(MINUTE, s.heure_debut, s.debut_reel) ELSE 0 END) as retard_minutes,
             GROUP_CONCAT(DISTINCT n.id ORDER BY n.id) as niveau_ids,
             GROUP_CONCAT(DISTINCT n.nom ORDER BY n.nom SEPARATOR ', ') as niveaux,
             GROUP_CONCAT(DISTINCT t.tarif_heure ORDER BY n.id) as tarifs
@@ -168,20 +189,31 @@ if (!empty($niveau_id)) {
 $stmt->execute();
 $enseignants = $stmt->fetchAll();
 
-// Calcul des salaires
+// Calcul des salaires basé sur les heures réellement effectuées
 foreach ($enseignants as &$enseignant) {
     $niveau_ids = explode(',', $enseignant['niveau_ids']);
     $tarifs = explode(',', $enseignant['tarifs']);
     
     $salaire_total = 0;
-    $heures_par_niveau = [];
     
     if (!empty($enseignant['heures_effectuees']) && !empty($tarifs[0])) {
+        // Répartition des heures par niveau
         $heures_par_niveau = array_fill_keys($niveau_ids, $enseignant['heures_effectuees'] / count($niveau_ids));
         
         foreach ($heures_par_niveau as $n_id => $heures) {
             $tarif = $tarifs[array_search($n_id, $niveau_ids)];
-            $salaire_total += $heures * $tarif;
+            
+            // Calcul des heures complètes et minutes restantes
+            $heures_completes = floor($heures);
+            $minutes_restantes = ($heures - $heures_completes) * 60;
+            
+            // Paiement des heures complètes
+            $salaire_total += $heures_completes * $tarif;
+            
+            // Paiement des minutes restantes (à moitié)
+            if ($minutes_restantes > 0) {
+                $salaire_total += ($minutes_restantes * ($tarif/60)) / 2;
+            }
         }
     }
     
@@ -255,6 +287,8 @@ foreach ($enseignants as $enseignant) {
                             <th>Nom</th>
                             <th>Téléphone</th>
                             <th>Heures effectuées</th>
+                            <th>Heures prévues</th>
+                            <th>Retard moyen (min)</th>
                             <th>Niveaux</th>
                             <th>Salaire total (FCFA)</th>
                         </tr>
@@ -262,7 +296,7 @@ foreach ($enseignants as $enseignant) {
                     <tbody>
                         <?php if (empty($enseignants)): ?>
                         <tr>
-                            <td colspan="5" class="text-center py-4">
+                            <td colspan="7" class="text-center py-4">
                                 Aucun enseignant trouvé avec les critères sélectionnés
                             </td>
                         </tr>
@@ -271,7 +305,9 @@ foreach ($enseignants as $enseignant) {
                         <tr>
                             <td><?= htmlspecialchars($enseignant['name']) ?></td>
                             <td><?= htmlspecialchars($enseignant['phone']) ?></td>
-                            <td><?= $enseignant['heures_effectuees'] ?? 0 ?>h</td>
+                            <td><?= number_format($enseignant['heures_effectuees'] ?? 0, 2, ',', ' ') ?>h</td>
+                            <td><?= number_format($enseignant['heures_prevues'] ?? 0, 2, ',', ' ') ?>h</td>
+                            <td><?= round($enseignant['retard_minutes'] / max(1, $enseignant['heures_effectuees']), 1) ?></td>
                             <td><?= htmlspecialchars($enseignant['niveaux'] ?? 'N/A') ?></td>
                             <td><?= number_format($enseignant['salaire'] ?? 0, 2, ',', ' ') ?></td>
                         </tr>
@@ -281,7 +317,9 @@ foreach ($enseignants as $enseignant) {
                     <tfoot class="table-secondary">
                         <tr>
                             <th colspan="2">Totaux</th>
-                            <th><?= $total_heures ?>h</th>
+                            <th><?= number_format($total_heures, 2, ',', ' ') ?>h</th>
+                            <th></th>
+                            <th></th>
                             <th></th>
                             <th><?= number_format($total_salaires, 2, ',', ' ') ?> FCFA</th>
                         </tr>
