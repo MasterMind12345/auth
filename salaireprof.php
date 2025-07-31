@@ -103,7 +103,8 @@ if (isset($_GET['export'])) {
             'tarif_base' => $tarif_horaire,
             'penalite' => $penalite,
             'salaire' => $salaire_seance,
-            'commentaire' => $retard >= 30 ? "Retard de $retard minutes" : ""
+            'commentaire' => $retard >= 30 ? "Retard de $retard minutes" : "",
+            'seance_id' => $seance['seance_id']
         ];
         
         $total_minutes += $duree_minutes;
@@ -140,7 +141,6 @@ if (isset($_GET['export'])) {
                     <th>Durée</th>
                     <th>Retard (min)</th>
                     <th>Tarif base</th>
-                    <th>Pénalité</th>
                     <th>Salaire séance</th>
                 </tr>';
     
@@ -154,7 +154,6 @@ if (isset($_GET['export'])) {
                     <td>' . $seance['duree'] . '</td>
                     <td>' . $seance['retard'] . '</td>
                     <td>' . number_format($seance['tarif_base'], 0, ',', ' ') . '</td>
-                    <td class="penalite">' . ($seance['penalite'] > 0 ? '-' . number_format($seance['penalite'], 0, ',', ' ') : '') . '</td>
                     <td>' . number_format($seance['salaire'], 0, ',', ' ') . '</td>
                 </tr>';
     }
@@ -163,11 +162,9 @@ if (isset($_GET['export'])) {
     $total_minutes_rest = $total_minutes % 60;
     
     $html .= '<tr class="total-row">
-                <td colspan="5"><strong>TOTAUX</strong></td>
-                <td>' . sprintf("%dh%02d", $total_heures, $total_minutes_rest) . '</td>
+                <td colspan="6"><strong>TOTAUX</strong></td>
                 <td></td>
                 <td></td>
-                <td class="penalite">-' . number_format($total_penalites, 0, ',', ' ') . '</td>
                 <td><strong>' . number_format($total_salaire, 0, ',', ' ') . ' FCFA</strong></td>
             </tr>';
     
@@ -275,7 +272,8 @@ foreach ($seances as $seance) {
         'tarif_base' => $tarif_horaire,
         'penalite' => $penalite,
         'salaire' => $salaire_seance,
-        'commentaire' => $retard >= 30 ? "Retard de $retard minutes" : ""
+        'commentaire' => $retard >= 30 ? "Retard de $retard minutes" : "",
+        'seance_id' => $seance['seance_id']
     ];
     
     $total_minutes += $duree_minutes;
@@ -371,6 +369,18 @@ $enseignant = $stmt->fetch();
         .btn-danger:hover {
             transform: translateY(-3px);
             box-shadow: 0 8px 25px rgba(255, 65, 108, 0.4);
+        }
+        
+        .btn-request {
+            background: linear-gradient(135deg, #4e54c8, #8f94fb);
+            color: white;
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+        }
+        
+        .btn-request:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(78, 84, 200, 0.4);
         }
         
         .table-responsive {
@@ -505,7 +515,6 @@ $enseignant = $stmt->fetch();
                     <h4 class="alert-heading">Résumé</h4>
                     <p>
                         <strong>Total heures:</strong> <?= $total_duree ?> | 
-                        <strong>Pénalités:</strong> <span class="penalite">-<?= number_format($total_penalites, 0, ',', ' ') ?> FCFA</span> | 
                         <strong>Salaire net:</strong> <?= number_format($total_salaire, 0, ',', ' ') ?> FCFA
                     </p>
                 </div>
@@ -522,8 +531,8 @@ $enseignant = $stmt->fetch();
                                 <th>Durée</th>
                                 <th>Retard</th>
                                 <th>Tarif base</th>
-                                <th>Pénalité</th>
                                 <th>Salaire séance</th>
+                                <th>Requête</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -553,20 +562,22 @@ $enseignant = $stmt->fetch();
                                     </span>
                                 </td>
                                 <td><?= number_format($seance['tarif_base'], 0, ',', ' ') ?></td>
-                                <td class="penalite"><?= $seance['penalite'] > 0 ? '-' . number_format($seance['penalite'], 0, ',', ' ') : '' ?></td>
                                 <td><?= number_format($seance['salaire'], 0, ',', ' ') ?></td>
+                                <td>
+                                    <a href="requete.php?seance_id=<?= $seance['seance_id'] ?>&date=<?= urlencode($seance['date']) ?>&heure=<?= urlencode($seance['heure']) ?>&matiere=<?= urlencode($seance['matiere']) ?>&salle=<?= urlencode($seance['salle']) ?>&niveau=<?= urlencode($seance['niveau']) ?>&penalite=<?= $seance['penalite'] ?>" 
+                                       class="btn btn-request">
+                                        <i class="fas fa-paper-plane me-1"></i> Requête
+                                    </a>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                             <?php endif; ?>
                         </tbody>
                         <tfoot>
                             <tr class="total-row">
-                                <th colspan="5">TOTAUX</th>
-                                <th><?= $total_duree ?></th>
-                                <th></th>
-                                <th></th>
-                                <th class="penalite">-<?= number_format($total_penalites, 0, ',', ' ') ?></th>
+                                <th colspan="8">TOTAUX</th>
                                 <th><?= number_format($total_salaire, 0, ',', ' ') ?> FCFA</th>
+                                <th></th>
                             </tr>
                         </tfoot>
                     </table>
